@@ -15,14 +15,6 @@
     };
 
     flake-utils.url = "github:numtide/flake-utils";
-
-    nix-vscode-extensions = {
-      url = "github:nix-community/nix-vscode-extensions";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-        flake-utils.follows = "flake-utils";
-      };
-    };
   };
 
   outputs = {
@@ -31,7 +23,6 @@
     crane,
     flake-utils,
     fenix,
-    nix-vscode-extensions,
     ...
   }:
     flake-utils.lib.eachDefaultSystem (system: let
@@ -50,23 +41,38 @@
 
       craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
 
-      my-crate = craneLib.buildPackage {
-        src = craneLib.cleanCargoSource (craneLib.path ./.);
-        strictDeps = true;
+      my-crate = let
+        # Only keeps markdown files
+        linkerFilter = path: _type: builtins.match ".*x$" path != null;
+        linkerOrCargo = path: type:
+          (linkerFilter path type) || (craneLib.filterCargoSources path type);
+      in
+        craneLib.buildPackage
+        {
+          src = pkgs.lib.cleanSourceWith {
+            src = craneLib.path ./.;
+            filter = linkerOrCargo;
+          };
+          strictDeps = true;
 
-        cargoExtraArgs = "--target thumbv7em-none-eabihf";
-        doCheck = false;
+          cargoExtraArgs = "--target thumbv7em-none-eabihf";
+          doCheck = false;
 
-        buildInputs =
-          [
-            # Add additional build inputs here
-          ]
-          ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-            # Additional darwin specific inputs can be set here
-            pkgs.libiconv
-            pkgs.darwin.IOKit
-          ];
-      };
+          buildInputs =
+            [
+              # Add additional build inputs here
+            ]
+            ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+              # Additional darwin specific inputs can be set here
+              pkgs.libiconv
+              pkgs.darwin.IOKit
+            ];
+
+          extraDummyScript = ''
+            cp -a ${./memory.x} $out/memory.x
+            rm -rf $out/src/bin/crane-dummy-*
+          '';
+        };
     in {
       checks = {
         inherit my-crate;
@@ -79,13 +85,10 @@
       };
 
       devShells.default = craneLib.devShell {
-        # Inherit inputs from checks.
         checks = self.checks.${system};
 
-        # Additional dev-shell environment variables can be set directly
-        # MY_CUSTOM_DEVELOPMENT_VAR = "something else";
         RUST_SRC_PATH = "${fenix.packages.${system}.complete.rust-src}/lib/rustlib/src/rust/library";
-        # Extra inputs can be added here; cargo and rustc are provided by default.
+
         packages = with pkgs; [
           darwin.IOKit
           probe-rs

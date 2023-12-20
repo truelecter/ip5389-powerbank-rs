@@ -1,0 +1,5 @@
+- DMA
+- Timers for reading info
+  - Handle stuck bq4050 as well
+- Sleep modes
+- GUI
