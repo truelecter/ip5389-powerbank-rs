@@ -26,8 +26,9 @@ use embedded_graphics::{
   draw_target::DrawTarget,
   pixelcolor::{Rgb565, RgbColor},
   text::Text,
-  geometry::Point,
+  geometry::{Point, Dimensions, Size},
   mono_font::{ascii::FONT_9X18_BOLD, MonoTextStyle},
+  primitives::{StyledDrawable, Rectangle, PrimitiveStyleBuilder},
   Drawable
 };
 use display_interface_spi::SPIInterface;
@@ -51,6 +52,10 @@ mod app {
     temp: f32,
   }
 
+  pub struct DisplayRedrawLocations {
+    temp: Rectangle,
+  }
+
   #[shared]
   struct Shared {
     ina: InaValues,
@@ -60,7 +65,9 @@ mod app {
   #[local]
   struct Local {
     data_timer: CounterMs<TIM1>,
-    redraw_timer: CounterMs<TIM2>,
+    bq4050: BQ4050<BlockingI2c<I2C2, (Pin<'B', 10, Alternate<OpenDrain>>, Pin<'B', 11, Alternate<OpenDrain>>)>>,
+    ina3221: INA3221<BlockingI2c<I2C1, (Pin<'B', 6, Alternate<OpenDrain>>, Pin<'B', 7, Alternate<OpenDrain>>)>>,
+
     button: PA0<Input<PullDown>>,
 
     display: Display<
@@ -72,8 +79,8 @@ mod app {
       ST7789,
       Pin<'A', 1, Output>
     >,
-    bq4050: BQ4050<BlockingI2c<I2C2, (Pin<'B', 10, Alternate<OpenDrain>>, Pin<'B', 11, Alternate<OpenDrain>>)>>,
-    ina3221: INA3221<BlockingI2c<I2C1, (Pin<'B', 6, Alternate<OpenDrain>>, Pin<'B', 7, Alternate<OpenDrain>>)>>,
+    redraw_timer: CounterMs<TIM2>,
+    fills: DisplayRedrawLocations,
   }
 
   #[monotonic(binds = SysTick, default = true)]
@@ -211,6 +218,12 @@ mod app {
         redraw_timer,
         button,
         display,
+        fills: DisplayRedrawLocations {
+          temp: Rectangle {
+            top_left: Point { x: 0, y: 0 },
+            size: Size { width: 0, height: 0 },
+          },
+        },
       },
       init::Monotonics(mono),
     )
@@ -261,17 +274,30 @@ mod app {
     cx.local.data_timer.clear_interrupt(stm32f1xx_hal::timer::Event::Update);
   }
 
-  #[task(priority = 2, binds = TIM2, shared = [ina, bq], local = [display, redraw_timer])]
+  #[task(priority = 2, binds = TIM2, shared = [ina, bq], local = [display, redraw_timer, fills])]
   fn redraw_timer_update(cx: redraw_timer_update::Context) {
     let display = cx.local.display;
+    let fills = cx.local.fills;
 
     (cx.shared.bq, cx.shared.ina).lock(|bq, ina| {
-      let _ = Text::new(
-          arrform!(64, "Temp: {:.2}", bq.temp).as_str(),
+      let v = arrform!(64, "Temp: {:.2}", bq.temp);
+
+      fills.temp.draw_styled(
+        &PrimitiveStyleBuilder::new()
+          .fill_color(Rgb565::BLACK)
+          .build(),
+        display,
+      ).unwrap();
+
+      let a: Text<'_, _> = Text::new(
+          &v.as_str(),
           Point::new(50, 50),
           MonoTextStyle::new(&FONT_9X18_BOLD, Rgb565::WHITE),
-        )
-        .draw(display).unwrap();
+        );
+
+      fills.temp = a.bounding_box();
+
+      a.draw(display).unwrap();
     });
 
     let int = cx.local.redraw_timer.get_interrupt();
