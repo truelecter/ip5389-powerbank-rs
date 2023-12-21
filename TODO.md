@@ -1,5 +1,6 @@
-- DMA
-- Timers for reading info
-  - Handle stuck bq4050 as well
+- [x] Find button
+- [x] Timers for reading info
+- Handle stuck bq4050
 - Sleep modes
 - GUI
+- DMA
