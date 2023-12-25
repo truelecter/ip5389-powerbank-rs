@@ -5,15 +5,15 @@
 
 use panic_rtt_target as _;
 
-use arrform::{arrform, ArrForm};
-
 use rtic::app;
 use rtt_target::{rprintln, rtt_init_print};
-use systick_monotonic::{fugit::Duration, Systick};
+use cortex_m_rt::pre_init;
+use systick_monotonic::Systick;
 
 use stm32f1xx_hal::{
   prelude::*,
-  pac::{I2C2, I2C1, SPI1, TIM1, TIM2},
+  pac::{I2C2, I2C1, SPI1, TIM2, TIM4},
+  timer::Timer,
   spi::{Spi, NoMiso, Spi1NoRemap},
   i2c::{BlockingI2c, Mode},
   timer::CounterMs,
@@ -26,9 +26,8 @@ use embedded_graphics::{
   draw_target::DrawTarget,
   pixelcolor::{Rgb565, RgbColor},
   text::Text,
-  geometry::{Point, Dimensions, Size},
+  geometry::Point,
   mono_font::{ascii::FONT_9X18_BOLD, MonoTextStyle},
-  primitives::{StyledDrawable, Rectangle, PrimitiveStyleBuilder},
   Drawable
 };
 use display_interface_spi::SPIInterface;
@@ -36,12 +35,20 @@ use mipidsi::{Builder, Display, models::ST7789};
 
 use ina3221::INA3221;
 
-mod bq4050;
-use crate::bq4050::BQ4050;
+mod peripherals;
+use crate::peripherals::bq4050::BQ4050;
+use crate::peripherals::bq4050;
+
+#[pre_init]
+unsafe fn preinit() -> () {
+  // TODO - disable baclkight
+}
 
 #[app(device = stm32f1xx_hal::pac, peripherals = true)]
 mod app {
   use super::*;
+
+  static mut FMT_BUF: [u8; 64] = [0u8; 64];
 
   pub struct InaValues {
     bus: [f32; 3],
@@ -53,7 +60,7 @@ mod app {
   }
 
   pub struct DisplayRedrawLocations {
-    temp: Rectangle,
+    temp: Text<'static, MonoTextStyle<'static, Rgb565>>,
   }
 
   #[shared]
@@ -64,7 +71,7 @@ mod app {
 
   #[local]
   struct Local {
-    data_timer: CounterMs<TIM1>,
+    data_timer: CounterMs<TIM4>,
     bq4050: BQ4050<BlockingI2c<I2C2, (Pin<'B', 10, Alternate<OpenDrain>>, Pin<'B', 11, Alternate<OpenDrain>>)>>,
     ina3221: INA3221<BlockingI2c<I2C1, (Pin<'B', 6, Alternate<OpenDrain>>, Pin<'B', 7, Alternate<OpenDrain>>)>>,
 
@@ -100,7 +107,7 @@ mod app {
         .cfgr
         .hclk(72.MHz())
         .sysclk(72.MHz())
-        .pclk1(36.MHz())
+        .pclk2(72.MHz())
         .freeze(&mut flash.acr);
 
     let mut delay = cx.device.TIM3.delay_us(&clocks);
@@ -110,6 +117,15 @@ mod app {
     let mut gpiob = cx.device.GPIOB.split();
 
     // Display initialization
+    // PA8 - led light. Low is off
+    let backlight = gpioa.pa8.into_alternate_push_pull(&mut gpioa.crh);
+    let mut backlight_pwm = Timer::new(cx.device.TIM1, &clocks)
+      .pwm_hz(backlight, &mut afio.mapr, 1.kHz());
+
+    let max = backlight_pwm.get_max_duty();
+    backlight_pwm.enable(stm32f1xx_hal::timer::Channel::C1);
+    backlight_pwm.set_duty(stm32f1xx_hal::timer::Channel::C1, max / 2);
+
     let sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl);
     let mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl);
     let cs = gpioa.pa3.into_push_pull_output(&mut gpioa.crl);
@@ -121,7 +137,7 @@ mod app {
       (sck, NoMiso, mosi),
       &mut afio.mapr,
       embedded_hal::spi::MODE_3,
-      16.MHz(),
+      48.MHz(),
       clocks,
     );
 
@@ -137,7 +153,8 @@ mod app {
         .unwrap();
 
     // Clear the display initially
-    display.clear(Rgb565::BLACK).unwrap();
+    display.clear(Rgb565::RED).unwrap();
+
     rprintln!("Display init finished");
 
     // INA PB6 PB7
@@ -152,8 +169,8 @@ mod app {
       &mut afio.mapr,
       Mode::Standard { frequency: 100.kHz() },
       clocks,
-      20,
-      2,
+      100,
+      5,
       20,
       20,
     );
@@ -188,7 +205,7 @@ mod app {
     let bq4050 = bq4050::BQ4050::new(i2c2);
     rprintln!("BQ4050 init finished");
 
-    let mut data_timer = cx.device.TIM1.counter_ms(&clocks);
+    let mut data_timer = cx.device.TIM4.counter_ms(&clocks);
     data_timer.start(1.secs()).unwrap();
     data_timer.listen(stm32f1xx_hal::timer::Event::Update);
 
@@ -219,17 +236,18 @@ mod app {
         button,
         display,
         fills: DisplayRedrawLocations {
-          temp: Rectangle {
-            top_left: Point { x: 0, y: 0 },
-            size: Size { width: 0, height: 0 },
-          },
+          temp: Text::new(
+            "",
+            Point::new(50, 50),
+            MonoTextStyle::new(&FONT_9X18_BOLD, Rgb565::WHITE),
+          ),
         },
       },
       init::Monotonics(mono),
     )
   }
 
-  #[task(binds = TIM1_UP, shared = [ina, bq], local = [bq4050, ina3221, data_timer])]
+  #[task(binds = TIM4, shared = [ina, bq], local = [bq4050, ina3221, data_timer])]
   fn data_timer_update(cx: data_timer_update::Context) {
     let ina3221 = cx.local.ina3221;
     let bq4050 = cx.local.bq4050;
@@ -274,31 +292,48 @@ mod app {
     cx.local.data_timer.clear_interrupt(stm32f1xx_hal::timer::Event::Update);
   }
 
+  #[derive(Default)]
+  struct DrawData {
+    pack_temp: f32,
+    bus: [f32; 3],
+    volt: [f32; 3],
+  }
+
   #[task(priority = 2, binds = TIM2, shared = [ina, bq], local = [display, redraw_timer, fills])]
   fn redraw_timer_update(cx: redraw_timer_update::Context) {
     let display = cx.local.display;
     let fills = cx.local.fills;
+    let mut draw_data:DrawData = Default::default();
 
     (cx.shared.bq, cx.shared.ina).lock(|bq, ina| {
-      let v = arrform!(64, "Temp: {:.2}", bq.temp);
+      for i in 0..=2 {
+        draw_data.bus[i] = ina.bus[i];
+        draw_data.volt[i] = ina.volt[i];
+      }
 
-      fills.temp.draw_styled(
-        &PrimitiveStyleBuilder::new()
-          .fill_color(Rgb565::BLACK)
-          .build(),
-        display,
-      ).unwrap();
-
-      let a: Text<'_, _> = Text::new(
-          &v.as_str(),
-          Point::new(50, 50),
-          MonoTextStyle::new(&FONT_9X18_BOLD, Rgb565::WHITE),
-        );
-
-      fills.temp = a.bounding_box();
-
-      a.draw(display).unwrap();
+      draw_data.pack_temp = bq.temp;
     });
+
+    fills.temp.draw(display).unwrap();
+
+    let buf = unsafe {&mut FMT_BUF };
+    let v = format_no_std::show(
+        buf,
+        format_args!("Temp: {:.2}", draw_data.pack_temp),
+    ).unwrap();
+
+    Text::new(
+      &v,
+      Point::new(50, 50),
+      MonoTextStyle::new(&FONT_9X18_BOLD, Rgb565::WHITE),
+    )
+    .draw(display).unwrap();
+
+    fills.temp = Text::new(
+      &v,
+      Point::new(50, 50),
+      MonoTextStyle::new(&FONT_9X18_BOLD, Rgb565::BLACK),
+    );
 
     let int = cx.local.redraw_timer.get_interrupt();
     cx.local.redraw_timer.clear_interrupt(int);

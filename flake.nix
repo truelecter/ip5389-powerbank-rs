@@ -61,6 +61,7 @@
           buildInputs =
             [
               # Add additional build inputs here
+              pkgs.SDL2
             ]
             ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
               # Additional darwin specific inputs can be set here
@@ -78,11 +79,11 @@
         inherit my-crate;
       };
 
-      packages.default = my-crate;
+      # packages.default = my-crate;
 
-      apps.default = flake-utils.lib.mkApp {
-        drv = my-crate;
-      };
+      # apps.default = flake-utils.lib.mkApp {
+      #   drv = my-crate;
+      # };
 
       devShells.default = craneLib.devShell {
         checks = self.checks.${system};
@@ -92,6 +93,7 @@
         packages = with pkgs; [
           darwin.IOKit
           probe-rs
+          rust-analyzer
         ];
       };
     });

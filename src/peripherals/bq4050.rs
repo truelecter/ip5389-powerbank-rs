@@ -1,4 +1,3 @@
-#![no_std]
 use byteorder::{ByteOrder, LittleEndian};
 use embedded_hal::blocking::i2c::{WriteRead, Write, Read};
 

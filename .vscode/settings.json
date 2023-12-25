@@ -3,5 +3,7 @@
   "rust-analyzer.cargo.extraArgs": [
     "--target", "thumbv7em-none-eabihf",
   ],
-  "rust-analyzer.check.allTargets": false
+  "rust-analyzer.check.allTargets": false,
+  "nixEnvSelector.suggestion": true,
+  "nixEnvSelector.nixFile": "${workspaceRoot}/flake.nix",
 }

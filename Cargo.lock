@@ -247,15 +247,6 @@ dependencies = [
 
 [[package]]
 name = "embedded-graphics"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40a69991ceb896bd4810a0cf2bcc46fc94b7860573c71f965d8e5b3d66942fed"
-dependencies = [
- "byteorder",
-]
-
-[[package]]
-name = "embedded-graphics"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0649998afacf6d575d126d83e68b78c0ab0e00ca2ac7e9b3db11b4cbe8274ef0"
@@ -278,6 +269,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-graphics-framebuf"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22354420f68727fa24d1e2741dae1e9a041065e80fb63b35a8d19c647a85be76"
+dependencies = [
+ "embedded-dma",
+ "embedded-graphics",
+]
+
+[[package]]
 name = "embedded-hal"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -288,6 +289,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-layout"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd38d6d83acd193889e7fbdffc9d16bb82d4328d372c7c75826619a8eb8cbcda"
+dependencies = [
+ "embedded-graphics",
+ "embedded-layout-macros",
+]
+
+[[package]]
+name = "embedded-layout-macros"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f6e621fe4c7e05b695274b722dc0a60bacd1c8696b58191baa0154713d52400"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.41",
+]
+
+[[package]]
 name = "float-cmp"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -295,6 +317,12 @@ checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
 dependencies = [
  "num-traits",
 ]
+
+[[package]]
+name = "format_no_std"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d8ca877c98f19024674b6959301d81d3708c417823fa050692b45b54d74fe7d"
 
 [[package]]
 name = "fugit"
@@ -469,15 +497,18 @@ dependencies = [
  "cortex-m-rtic",
  "critical-section",
  "defmt-rtt",
+ "display-interface",
  "display-interface-spi",
  "dwt-systick-monotonic",
- "embedded-graphics 0.8.1",
+ "embedded-graphics",
+ "embedded-graphics-framebuf",
  "embedded-hal",
+ "embedded-layout",
+ "format_no_std",
  "ina3221",
  "mipidsi",
  "panic-rtt-target",
  "rtt-target 0.4.0",
- "st7789v",
  "stm32f1xx-hal",
  "systick-monotonic",
 ]
@@ -625,15 +656,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 dependencies = [
  "lock_api",
-]
-
-[[package]]
-name = "st7789v"
-version = "0.1.0"
-source = "git+https://github.com/wose/st7789v.git#f7cd789b346c977a7425b9020cbf20f04a32027b"
-dependencies = [
- "embedded-graphics 0.6.2",
- "embedded-hal",
 ]
 
 [[package]]
