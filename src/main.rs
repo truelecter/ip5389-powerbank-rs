@@ -35,9 +35,8 @@ use mipidsi::{Builder, Display, models::ST7789};
 
 use ina3221::INA3221;
 
-mod peripherals;
-use crate::peripherals::bq4050::BQ4050;
-use crate::peripherals::bq4050;
+use peripherals::bq4050::BQ4050;
+use peripherals::bq4050;
 
 #[pre_init]
 unsafe fn preinit() -> () {

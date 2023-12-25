@@ -18,7 +18,7 @@ use stm32f1xx_hal::{
     spi::{Spi, NoMiso},
 };
 
-mod peripherals;
+use peripherals;
 
 const W: u16 = 240;
 const H: u16 = 240;

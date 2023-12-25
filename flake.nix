@@ -75,9 +75,9 @@
           '';
         };
     in {
-      checks = {
-        inherit my-crate;
-      };
+      # checks = {
+      #   inherit my-crate;
+      # };
 
       # packages.default = my-crate;
 
@@ -86,12 +86,14 @@
       # };
 
       devShells.default = craneLib.devShell {
-        checks = self.checks.${system};
+        # checks = self.checks.${system};
 
         RUST_SRC_PATH = "${fenix.packages.${system}.complete.rust-src}/lib/rustlib/src/rust/library";
 
         packages = with pkgs; [
+          pkgs.SDL2
           darwin.IOKit
+          pkgs.libiconv
           probe-rs
           rust-analyzer
         ];

@@ -1,0 +1,12 @@
+[package]
+name = "peripherals"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+embedded-graphics.workspace = true
+embedded-layout.workspace = true
+embedded-layout-macros.workspace = true
+display-interface.workspace = true
+embedded-hal.workspace = true
+byteorder = { workspace = true, default-features = false }
