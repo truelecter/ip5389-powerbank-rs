@@ -3,6 +3,7 @@
   "nixEnvSelector.suggestion": true,
   "nixEnvSelector.nixFile": "${workspaceRoot}/flake.nix",
   "rust-analyzer.linkedProjects": [
-    "./emulation/Cargo.toml"
+    "./emulation/Cargo.toml",
+    "./Cargo.toml",
   ],
 }

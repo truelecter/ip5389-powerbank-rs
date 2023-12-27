@@ -40,8 +40,6 @@ fn main() -> Result<(), core::convert::Infallible> {
     let rectangle = Rectangle::new(Point::zero(), Size::new(17, 17)).into_styled(fill);
     let circle = Circle::new(Point::zero(), 16).into_styled(thick_stroke);
 
-    let a = graphics::one();
-
     // Draw a 3px wide outline around the display.
     display_area
         .into_styled(thick_stroke)
