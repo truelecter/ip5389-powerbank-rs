@@ -1,6 +1,8 @@
 {
-  // "rust-analyzer.cargo.target": "thumbv7em-none-eabihf",
   "rust-analyzer.check.allTargets": false,
   "nixEnvSelector.suggestion": true,
   "nixEnvSelector.nixFile": "${workspaceRoot}/flake.nix",
+  "rust-analyzer.linkedProjects": [
+    "./emulation/Cargo.toml"
+  ],
 }

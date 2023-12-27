@@ -96,6 +96,7 @@
           pkgs.libiconv
           probe-rs
           rust-analyzer
+          gcc-arm-embedded
         ];
       };
     });

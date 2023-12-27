@@ -7,7 +7,6 @@ use panic_rtt_target as _;
 use rtt_target::{rprintln, rtt_init_print};
 
 use stm32f1xx_hal as _;
-
 // use stm32f1xx_hal::{
 //     pac::Peripherals,
 //     prelude::*,

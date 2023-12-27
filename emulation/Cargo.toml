@@ -11,6 +11,10 @@ forced-target = "aarch64-apple-darwin"
 [dependencies]
 embedded-graphics-simulator = "0.6.0"
 
-embedded-graphics.workspace = true
-embedded-layout.workspace = true
-embedded-layout-macros.workspace = true
+embedded-graphics = "0.8.1"
+embedded-layout = "0.4.1"
+embedded-layout-macros = "0.3.1"
+
+graphics = { path = "../graphics" }
+
+[workspace]

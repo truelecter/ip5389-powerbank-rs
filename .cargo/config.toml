@@ -2,10 +2,7 @@
 target = "thumbv7em-none-eabihf"
 
 [target.thumbv7em-none-eabihf]
-runner = 'probe-rs run --chip AT32F403ACGU7'
-# runner = 'probe-rs run --chip STM32F103CB'
-
-[target.'cfg(all(target_arch = "arm", target_os = "none"))']
+# runner = 'probe-rs run --chip AT32F403ACGU7'
 rustflags = [
   "-C", "link-arg=-Tlink.x",
   # Previously, the linker arguments --nmagic and -Tlink.x were set here.

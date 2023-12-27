@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-embedded-graphics.workspace = true
-embedded-layout.workspace = true
-embedded-layout-macros.workspace = true
-display-interface.workspace = true
-embedded-hal.workspace = true
-byteorder = { workspace = true, default-features = false }
+embedded-hal = { version = "0.2.7", features = ["unproven"] }
+
+embedded-graphics = "0.8.1"
+embedded-layout = "0.4.1"
+embedded-layout-macros = "0.3.1"
+display-interface = "0.4.1"
+
+byteorder = { version = "1.5.0", default-features = false }

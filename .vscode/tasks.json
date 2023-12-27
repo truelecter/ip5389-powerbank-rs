@@ -1,0 +1,23 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build firmware (Debug)",
+      "command": "cargo",
+      "type": "shell",
+      "args": [
+        "build","--package", "firmware"
+      ],
+      "problemMatcher": [
+        "$rustc"
+      ],
+      "presentation": {
+        "showReuseMessage": false,
+        "reveal": "silent",
+        // "clear": true,
+        // "close": true,
+      },
+      "group": "build",
+    }
+  ]
+}
