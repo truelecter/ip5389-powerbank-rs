@@ -4,20 +4,18 @@ use embedded_graphics::{
   Drawable,
   pixelcolor::{Rgb565, RgbColor},
   draw_target::DrawTarget,
-  mono_font::{MonoTextStyle, ascii::FONT_8X13_BOLD, MonoFont},
+  mono_font::MonoTextStyle,
   text::Text,
 };
 
 use embedded_layout::{align::{horizontal, vertical, Align}, View};
 
 use crate::utils::float_to_fixed;
+use super::consts::{
+  BORDER_COLOR, BORDER_SIZE, PADDING, TABLE_FONT
+};
 
-const TABLE_FONT: &MonoFont<'_> = &FONT_8X13_BOLD;
-const BORDER_SIZE:u32 = 2;
-const PADDING:u32 = 1;
-const BORDER_COLOR:Rgb565 = Rgb565::WHITE;
-
-pub struct VoltTableEntry<'a> {
+pub struct VoltTableRow<'a> {
   bounds: Rectangle,
   voltage: f32,
   current: f32,
@@ -159,10 +157,9 @@ impl VoltTableCells {
   }
 }
 
-impl<'a> VoltTableEntry<'a> {
+impl<'a> VoltTableRow<'a> {
   pub fn new(
-    top_left: Point, width: u8,
-    voltage: f32, current: f32, power: f32,
+    top_left: Point, width: u32,
     active_text_color: Rgb565, inactive_text_color: Rgb565,
     caption: &'a str,
   ) -> Self {
@@ -174,9 +171,11 @@ impl<'a> VoltTableEntry<'a> {
     let bounds = Rectangle::new(top_left, size);
 
     Self {
-      bounds, voltage, current, power, caption,
-      active_text_color, inactive_text_color,
+      bounds, caption, active_text_color, inactive_text_color,
       cells: VoltTableCells::for_bounds(&bounds),
+      voltage: 0 as f32,
+      current: 0 as f32,
+      power: 0 as f32,
     }
   }
 
@@ -225,7 +224,7 @@ impl<'a> VoltTableEntry<'a> {
 
 /// Implementing `View` is required by the layout and alignment operations
 /// `View` teaches `embedded-layout` where our object is, how big it is and how to move it.
-impl View for VoltTableEntry<'_> {
+impl View for VoltTableRow<'_> {
   #[inline]
   fn translate_impl(&mut self, by: Point) {
       // make sure you don't accidentally call `translate`!
@@ -239,7 +238,7 @@ impl View for VoltTableEntry<'_> {
   }
 }
 
-impl<'a> Drawable for VoltTableEntry<'a> {
+impl<'a> Drawable for VoltTableRow<'a> {
   type Color = Rgb565;
   type Output = ();
 

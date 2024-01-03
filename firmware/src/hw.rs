@@ -10,7 +10,7 @@ use embedded_graphics::{
 };
 
 use embedded_layout::align::{Align, horizontal, vertical};
-use graphics::volttable::VoltTableEntry;
+use graphics::volttable::VoltTableRow;
 use panic_rtt_target as _;
 use rtt_target::{rprintln, rtt_init_print};
 
@@ -81,10 +81,9 @@ fn main() -> ! {
   let cols = [Rgb565::YELLOW, Rgb565::BLUE, Rgb565::RED, Rgb565::GREEN];
   let mut counter: usize = 0;
 
-  let r1 = VoltTableEntry::new(
+  let r1 = VoltTableRow::new(
     Point::new(0, 0),
     240,
-    0.1, 0.2, 0.3,
     Rgb565::CYAN,
     Rgb565::CYAN,
     "EXT1"
@@ -92,10 +91,9 @@ fn main() -> ! {
 
   r1.draw(&mut display).unwrap();
 
-  let r2 = VoltTableEntry::new(
+  let r2 = VoltTableRow::new(
     Point::new(0, 0),
     240,
-    0.1, 0.2, 0.3,
     Rgb565::CYAN,
     Rgb565::CYAN,
     "EXT2"
