@@ -26,6 +26,21 @@
       "BMPGDBSerialPort": "/dev/cu.usbmodem72AE21F31",
       // "runToEntryPoint": "main"
       "postLaunchCommands": ["mon rtt"]
+    },
+    {
+      "name": "BMP Debug hw",
+      "cwd": "${workspaceRoot}",
+      "executable": "${workspaceRoot}/target/thumbv7em-none-eabihf/debug/hw",
+      "request": "launch",
+      "preLaunchTask": "Build hw (Debug)",
+      "type": "cortex-debug",
+      "servertype": "bmp",
+      "interface": "swd",
+      "device": "AT32F403ACGU7",
+      "svdFile": "${workspaceRoot}/svd/AT32F403Axx_v2.svd",
+      "BMPGDBSerialPort": "/dev/cu.usbmodem72AE21F31",
+      // "runToEntryPoint": "main"
+      "postLaunchCommands": ["mon rtt"],
     }
   ]
 }

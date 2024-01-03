@@ -329,6 +329,7 @@ dependencies = [
  "embedded-layout",
  "embedded-layout-macros",
  "format_no_std",
+ "graphics",
  "ina3221",
  "mipidsi",
  "panic-rtt-target",
@@ -388,11 +389,11 @@ checksum = "1d758ba1b47b00caf47f24925c0074ecb20d6dfcffe7f6d53395c0465674841a"
 name = "graphics"
 version = "0.1.0"
 dependencies = [
- "byteorder",
  "display-interface",
  "embedded-graphics",
  "embedded-layout",
  "embedded-layout-macros",
+ "ryu",
 ]
 
 [[package]]
@@ -646,6 +647,12 @@ checksum = "bfa0f585226d2e68097d4f95d113b15b83a82e819ab25717ec0590d9584ef366"
 dependencies = [
  "semver 1.0.20",
 ]
+
+[[package]]
+name = "ryu"
+version = "1.0.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f98d2aa92eebf49b69786be48e4477826b256916e84a57ff2a4f21923b48eb4c"
 
 [[package]]
 name = "scopeguard"

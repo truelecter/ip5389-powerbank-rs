@@ -35,20 +35,24 @@
         combine [
           minimal.rustc
           minimal.cargo
+          default.clippy
+          default.rustfmt
           complete.rust-src
           targets.thumbv7em-none-eabihf.latest.rust-std
         ];
 
       craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
 
-      my-crate = let
-        # Only keeps markdown files
-        linkerFilter = path: _type: builtins.match ".*x$" path != null;
-        linkerOrCargo = path: type:
-          (linkerFilter path type) || (craneLib.filterCargoSources path type);
-      in
+      # Only keeps markdown files
+      linkerFilter = path: _type: builtins.match ".*x$" path != null;
+      linkerOrCargo = path: type:
+        (linkerFilter path type) || (craneLib.filterCargoSources path type);
+
+      firmware =
         craneLib.buildPackage
         {
+          inherit (craneLib.crateNameFromCargoToml {cargoToml = ./firmware/Cargo.toml;}) pname version;
+
           src = pkgs.lib.cleanSourceWith {
             src = craneLib.path ./.;
             filter = linkerOrCargo;
@@ -58,6 +62,28 @@
           cargoExtraArgs = "--target thumbv7em-none-eabihf";
           doCheck = false;
 
+          buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
+            # Additional darwin specific inputs can be set here
+            pkgs.libiconv
+            pkgs.darwin.IOKit
+          ];
+
+          extraDummyScript = ''
+            cp -a ${./memory.x} $out/memory.x
+            rm -rf $out/src/bin/crane-dummy-*
+          '';
+        };
+
+      emulator =
+        craneLib.buildPackage
+        {
+          inherit (craneLib.crateNameFromCargoToml {cargoToml = ./emulation/Cargo.toml;}) pname version;
+
+          src = pkgs.lib.cleanSourceWith {
+            src = craneLib.path ./.;
+            filter = linkerOrCargo;
+          };
+          strictDeps = true;
           buildInputs =
             [
               # Add additional build inputs here
@@ -69,24 +95,30 @@
               pkgs.darwin.IOKit
             ];
 
-          extraDummyScript = ''
-            cp -a ${./memory.x} $out/memory.x
-            rm -rf $out/src/bin/crane-dummy-*
+          doCheck = false;
+
+          cargoBuildCommand = ''
+            cd emulation
+            cargo build --profile release
           '';
         };
     in {
-      # checks = {
-      #   inherit my-crate;
-      # };
+      checks = {
+        inherit firmware;
+      };
 
-      # packages.default = my-crate;
+      packages = {
+        inherit emulator firmware;
 
-      # apps.default = flake-utils.lib.mkApp {
-      #   drv = my-crate;
-      # };
+        default = firmware;
+      };
+
+      apps.default = flake-utils.lib.mkApp {
+        drv = emulator;
+      };
 
       devShells.default = craneLib.devShell {
-        # checks = self.checks.${system};
+        checks = self.checks.${system};
 
         RUST_SRC_PATH = "${fenix.packages.${system}.complete.rust-src}/lib/rustlib/src/rust/library";
 

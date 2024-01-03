@@ -246,10 +246,21 @@ mod app {
     )
   }
 
+  #[idle()]
+  fn idle(_: idle::Context) -> ! {
+    loop {
+        // Now Wait For Interrupt is used instead of a busy-wait loop
+        // to allow MCU to sleep between interrupts
+        // https://developer.arm.com/documentation/ddi0406/c/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/WFI
+        rtic::export::wfi()
+    }
+  }
+
   #[task(binds = TIM4, shared = [ina, bq], local = [bq4050, ina3221, data_timer])]
   fn data_timer_update(cx: data_timer_update::Context) {
     let ina3221 = cx.local.ina3221;
     let bq4050 = cx.local.bq4050;
+    let timer = cx.local.data_timer;
 
     (cx.shared.bq, cx.shared.ina).lock(|bq, ina| {
       match ina3221.bus_voltage(ina3221::Channel::Ch1) {
@@ -288,7 +299,8 @@ mod app {
       };
     });
 
-    cx.local.data_timer.clear_interrupt(stm32f1xx_hal::timer::Event::Update);
+    let int = timer.get_interrupt();
+    timer.clear_interrupt(int);
   }
 
   #[derive(Default)]
@@ -303,6 +315,7 @@ mod app {
     let display = cx.local.display;
     let fills = cx.local.fills;
     let mut draw_data:DrawData = Default::default();
+    let timer = cx.local.redraw_timer;
 
     (cx.shared.bq, cx.shared.ina).lock(|bq, ina| {
       for i in 0..=2 {
@@ -334,8 +347,8 @@ mod app {
       MonoTextStyle::new(&FONT_9X18_BOLD, Rgb565::BLACK),
     );
 
-    let int = cx.local.redraw_timer.get_interrupt();
-    cx.local.redraw_timer.clear_interrupt(int);
+    let int = timer.get_interrupt();
+    timer.clear_interrupt(int);
   }
 
   #[task(binds = EXTI0, local = [button])]

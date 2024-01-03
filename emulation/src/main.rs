@@ -1,65 +1,74 @@
-//! This example is an approximate reimplementation of the `embedded-graphics` Hello, World! example
 use embedded_graphics_simulator::{
-    BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, Window,
+    OutputSettingsBuilder, SimulatorDisplay, Window,
 };
 
 use embedded_graphics::{
-    mono_font::{ascii::FONT_6X9, MonoTextStyle},
-    pixelcolor::BinaryColor,
-    prelude::*,
-    primitives::{Circle, PrimitiveStyle, Rectangle, Triangle},
-    text::Text,
+    pixelcolor::Rgb565,
+    prelude::*, primitives::{Rectangle, StyledDrawable, PrimitiveStyleBuilder},
 };
 
-use embedded_layout::{
-    layout::linear::{
-        spacing::{DistributeFill, FixedMargin},
-        LinearLayout,
-    },
-    prelude::*,
-};
+use embedded_layout::prelude::*;
+
+use graphics::volttable::VoltTableEntry;
+
+/*
++------+---------+---------+-------+
+| Port | Voltage | Current | Power |
++------+---------+---------+-------+
+| USB  |
++------+---------+---------+-------+
+| EXT1 |
++------+---------+---------+-------+
+| EXT2 |
++------+---------+---------+-------+
+| DC   |
++------+---------+---------+-------+
+*/
 
 fn main() -> Result<(), core::convert::Infallible> {
-    let mut display: SimulatorDisplay<BinaryColor> = SimulatorDisplay::new(Size::new(128, 64));
+    let mut display: SimulatorDisplay<Rgb565> = SimulatorDisplay::new(Size::new(240, 240));
     let output_settings = OutputSettingsBuilder::new()
-        .theme(BinaryColorTheme::OledBlue)
+        // .theme()
         .build();
 
-    let display_area = display.bounding_box();
-
     // Create styles used by the drawing operations.
-    let thin_stroke = PrimitiveStyle::with_stroke(BinaryColor::On, 1);
-    let thick_stroke = PrimitiveStyle::with_stroke(BinaryColor::On, 3);
-    let fill = PrimitiveStyle::with_fill(BinaryColor::On);
-    let text_style = MonoTextStyle::new(&FONT_6X9, BinaryColor::On);
+    // let thin_stroke = PrimitiveStyle::with_stroke(Rgb565::BLUE, 1);
+    // let thick_stroke = PrimitiveStyle::with_stroke(Rgb565::YELLOW, 3);
+    // let fill = PrimitiveStyle::with_fill(Rgb565::RED);
+    // let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::CSS_MINT_CREAM);
 
-    // Create the view objects
-    let text = Text::new("embedded-layout", Point::zero(), text_style);
-    let triangle = Triangle::new(Point::new(0, 16), Point::new(16, 16), Point::new(8, 0))
-        .into_styled(thin_stroke);
-    let rectangle = Rectangle::new(Point::zero(), Size::new(17, 17)).into_styled(fill);
-    let circle = Circle::new(Point::zero(), 16).into_styled(thick_stroke);
+    let mut r1 = VoltTableEntry::new(
+        Point::new(0, 0),
+        240,
+        0.1, 0.2, 0.3,
+        Rgb565::CYAN,
+        Rgb565::CYAN,
+        "EXT1"
+    );
 
-    // Draw a 3px wide outline around the display.
-    display_area
-        .into_styled(thick_stroke)
-        .draw(&mut display)
-        .unwrap();
+    r1.draw_initial(&mut display)?;
+    r1.update_values(0.2, 0.3, 0.4);
+    r1.draw(&mut display)?;
 
-    // Lay out and draw the views
-    LinearLayout::vertical(
-        Chain::new(
-            LinearLayout::horizontal(Chain::new(triangle).append(rectangle).append(circle))
-                .with_spacing(DistributeFill(text.size().width))
-                .arrange(),
-        )
-        .append(text),
+    let r2 = VoltTableEntry::new(
+        Point::new(0, 0),
+        240,
+        0.1, 0.2, -0.3,
+        Rgb565::CYAN,
+        Rgb565::CYAN,
+        "EXT2"
     )
-    .with_spacing(FixedMargin(10))
-    .arrange()
-    .align_to(&display_area, horizontal::Center, vertical::Center)
-    .draw(&mut display)
-    .unwrap();
+        .align_to(&r1, horizontal::Center, vertical::TopToBottom);
+
+    r2.draw_initial(&mut display)?;
+    r2.draw(&mut display)?;
+
+    Rectangle::new(Point::zero(), Size::new(236, 10))
+        .align_to(&r2, horizontal::NoAlignment, vertical::TopToBottom)
+        .draw_styled(
+            &PrimitiveStyleBuilder::new().fill_color(Rgb565::BLUE).build(),
+            &mut display
+        )?;
 
     Window::new("Hello, element spacing!", &output_settings).show_static(&display);
     Ok(())

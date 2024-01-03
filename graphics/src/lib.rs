@@ -1,3 +1,5 @@
 #![no_std]
 
-pub fn one() -> u8 { 1 }
+pub mod volttable;
+
+pub(crate) mod utils;
