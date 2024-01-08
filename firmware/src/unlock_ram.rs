@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use core::ptr::{write_volatile, read_volatile};
+use core::ptr::{read_volatile, write_volatile};
 
 use panic_rtt_target as _;
 use rtt_target::{rprintln, rtt_init_print};
@@ -47,7 +47,6 @@ unsafe fn before_main() {
   write_volatile(FLASH_USD_UNLOCK, FLASH_UNLOCK_KEY1);
   write_volatile(FLASH_USD_UNLOCK, FLASH_UNLOCK_KEY2);
 
-
   // write_volatile(FLASH_CTRL, read_volatile(FLASH_CTRL) | 0b0000_0011_0000);
 
   loop {
@@ -64,7 +63,7 @@ unsafe fn before_main() {
 
   let f_res = read_volatile(FLASH_STS);
 
-  let mut counter:u32 = 1_000_000;
+  let mut counter: u32 = 1_000_000;
 
   loop {
     counter = counter - 1;
@@ -104,11 +103,10 @@ fn main() -> ! {
 
     if f_res & 0xFF == 0xFE {
       rprintln!("OK");
-
     } else {
       rprintln!("NOK, {:b}", f_res);
     }
   }
 
-  loop { }
+  loop {}
 }

@@ -1,19 +1,17 @@
 use embedded_graphics::{
+  draw_target::DrawTarget,
   geometry::{Point, Size},
-  primitives::{Rectangle, StyledDrawable, PrimitiveStyleBuilder},
   pixelcolor::{Rgb565, RgbColor},
+  primitives::{PrimitiveStyleBuilder, Rectangle, StyledDrawable},
   Drawable,
-  draw_target::DrawTarget
 };
 use embedded_layout::{
+  align::{horizontal, vertical, Align},
   View,
-  align::{Align, horizontal, vertical}
 };
 
+use super::consts::{BORDER_COLOR, BORDER_SIZE};
 use super::VoltTableRow;
-use super::consts::{
-  BORDER_COLOR, BORDER_SIZE, PADDING, TABLE_FONT
-};
 
 pub struct VoltTable<'a> {
   usb: VoltTableRow<'a>,
@@ -25,22 +23,24 @@ pub struct VoltTable<'a> {
 }
 
 impl<'a> VoltTable<'a> {
-  pub fn new(
-    top_left: Point, width: u32,
-  ) -> Self {
+  pub fn new(top_left: Point, width: u32) -> Self {
     let (usb, ext1, ext2, dc) = Self::generate_rows_from_point(top_left, width);
 
-    let bounds = Rectangle::with_corners(
-      top_left,
-      dc.bounds().bottom_right().unwrap()
-    );
+    let bounds = Rectangle::with_corners(top_left, dc.bounds().bottom_right().unwrap());
 
     Self {
-      bounds, usb, ext1, ext2, dc
+      bounds,
+      usb,
+      ext1,
+      ext2,
+      dc,
     }
   }
 
-  fn generate_rows_from_point(top_left: Point, width: u32) -> (
+  fn generate_rows_from_point(
+    top_left: Point,
+    width: u32,
+  ) -> (
     VoltTableRow<'a>,
     VoltTableRow<'a>,
     VoltTableRow<'a>,
@@ -49,55 +49,40 @@ impl<'a> VoltTable<'a> {
     // start with border offset. it will be drawn later
     let rows_top_left = top_left + Point::new(0, BORDER_SIZE as i32);
 
-    let usb = VoltTableRow::new(
-      rows_top_left,
-      width,
-      Rgb565::WHITE,
-      Rgb565::WHITE,
-      "USB",
+    let usb = VoltTableRow::new(rows_top_left, width, Rgb565::WHITE, Rgb565::BLACK, "USB");
+
+    let ext1 = VoltTableRow::new(Point::zero(), width, Rgb565::GREEN, Rgb565::BLACK, "EXT1")
+      .align_to(&usb, horizontal::NoAlignment, vertical::TopToBottom);
+
+    let ext2 = VoltTableRow::new(Point::zero(), width, Rgb565::CYAN, Rgb565::BLACK, "EXT2")
+      .align_to(&ext1, horizontal::NoAlignment, vertical::TopToBottom);
+
+    let dc = VoltTableRow::new(Point::zero(), width, Rgb565::YELLOW, Rgb565::BLACK, "DC").align_to(
+      &ext2,
+      horizontal::NoAlignment,
+      vertical::TopToBottom,
     );
-
-    let ext1 = VoltTableRow::new(
-      Point::zero(),
-      width,
-      Rgb565::GREEN,
-      Rgb565::WHITE,
-      "EXT1",
-    ).align_to(&usb, horizontal::NoAlignment, vertical::TopToBottom);
-
-    let ext2 = VoltTableRow::new(
-      Point::zero(),
-      width,
-      Rgb565::RED,
-      Rgb565::WHITE,
-      "EXT2",
-    ).align_to(&ext1, horizontal::NoAlignment, vertical::TopToBottom);
-
-    let dc = VoltTableRow::new(
-      Point::zero(),
-      width,
-      Rgb565::YELLOW,
-      Rgb565::WHITE,
-      "DC",
-    ).align_to(&ext2, horizontal::NoAlignment, vertical::TopToBottom);
 
     (usb, ext1, ext2, dc)
   }
 
-  pub fn draw_initial<D: DrawTarget<Color = Rgb565>>(&self, target: &mut D) -> Result<(), D::Error> {
+  pub fn draw_static<D: DrawTarget<Color = Rgb565>>(&self, target: &mut D) -> Result<(), D::Error> {
     let border_style = PrimitiveStyleBuilder::new()
       .stroke_width(BORDER_SIZE)
       .stroke_color(BORDER_COLOR)
       .stroke_alignment(embedded_graphics::primitives::StrokeAlignment::Inside)
       .build();
 
-    Rectangle::new(self.bounds.top_left, Size::new(self.bounds.size.width, BORDER_SIZE))
-      .draw_styled(&border_style, target)?;
+    Rectangle::new(
+      self.bounds.top_left,
+      Size::new(self.bounds.size.width, BORDER_SIZE),
+    )
+    .draw_styled(&border_style, target)?;
 
-    self.usb.draw_initial(target)?;
-    self.ext1.draw_initial(target)?;
-    self.ext2.draw_initial(target)?;
-    self.dc.draw_initial(target)?;
+    self.usb.draw_static(target)?;
+    self.ext1.draw_static(target)?;
+    self.ext2.draw_static(target)?;
+    self.dc.draw_static(target)?;
 
     Ok(())
   }
@@ -115,15 +100,12 @@ impl View for VoltTable<'_> {
     self.ext2 = ext2;
     self.dc = dc;
 
-    self. bounds = Rectangle::with_corners(
-      top_left,
-      self.dc.bounds().bottom_right().unwrap()
-    );
+    self.bounds = Rectangle::with_corners(top_left, self.dc.bounds().bottom_right().unwrap());
   }
 
   #[inline]
   fn bounds(&self) -> Rectangle {
-      self.bounds
+    self.bounds
   }
 }
 

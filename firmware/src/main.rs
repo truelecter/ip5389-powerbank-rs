@@ -5,38 +5,38 @@
 
 use panic_rtt_target as _;
 
+use cortex_m_rt::pre_init;
 use rtic::app;
 use rtt_target::{rprintln, rtt_init_print};
-use cortex_m_rt::pre_init;
 use systick_monotonic::Systick;
 
 use stm32f1xx_hal::{
-  prelude::*,
-  pac::{I2C2, I2C1, SPI1, TIM2, TIM4},
-  timer::Timer,
-  spi::{Spi, NoMiso, Spi1NoRemap},
-  i2c::{BlockingI2c, Mode},
-  timer::CounterMs,
-  gpio::{Pin, Alternate, OpenDrain, PinState, Output, Input, PullDown,ExtiPin, Edge},
   gpio::gpioa::PA0,
+  gpio::{Alternate, Edge, ExtiPin, Input, OpenDrain, Output, Pin, PinState, PullDown},
+  i2c::{BlockingI2c, Mode},
+  pac::{I2C1, I2C2, SPI1, TIM2, TIM4},
+  prelude::*,
+  spi::{NoMiso, Spi, Spi1NoRemap},
+  timer::CounterMs,
+  timer::Timer,
 };
 
 // Display st7789(v?)
+use display_interface_spi::SPIInterface;
 use embedded_graphics::{
   draw_target::DrawTarget,
-  pixelcolor::{Rgb565, RgbColor},
-  text::Text,
   geometry::Point,
   mono_font::{ascii::FONT_9X18_BOLD, MonoTextStyle},
-  Drawable
+  pixelcolor::{Rgb565, RgbColor},
+  text::Text,
+  Drawable,
 };
-use display_interface_spi::SPIInterface;
-use mipidsi::{Builder, Display, models::ST7789};
+use mipidsi::{models::ST7789, Builder, Display};
 
 use ina3221::INA3221;
 
-use peripherals::bq4050::BQ4050;
 use peripherals::bq4050;
+use peripherals::bq4050::BQ4050;
 
 #[pre_init]
 unsafe fn preinit() -> () {
@@ -71,8 +71,24 @@ mod app {
   #[local]
   struct Local {
     data_timer: CounterMs<TIM4>,
-    bq4050: BQ4050<BlockingI2c<I2C2, (Pin<'B', 10, Alternate<OpenDrain>>, Pin<'B', 11, Alternate<OpenDrain>>)>>,
-    ina3221: INA3221<BlockingI2c<I2C1, (Pin<'B', 6, Alternate<OpenDrain>>, Pin<'B', 7, Alternate<OpenDrain>>)>>,
+    bq4050: BQ4050<
+      BlockingI2c<
+        I2C2,
+        (
+          Pin<'B', 10, Alternate<OpenDrain>>,
+          Pin<'B', 11, Alternate<OpenDrain>>,
+        ),
+      >,
+    >,
+    ina3221: INA3221<
+      BlockingI2c<
+        I2C1,
+        (
+          Pin<'B', 6, Alternate<OpenDrain>>,
+          Pin<'B', 7, Alternate<OpenDrain>>,
+        ),
+      >,
+    >,
 
     button: PA0<Input<PullDown>>,
 
@@ -80,10 +96,10 @@ mod app {
       SPIInterface<
         Spi<SPI1, Spi1NoRemap, (Pin<'A', 5, Alternate>, NoMiso, Pin<'A', 7, Alternate>), u8>,
         Pin<'A', 2, Output>,
-        Pin<'A', 3, Output>
+        Pin<'A', 3, Output>,
       >,
       ST7789,
-      Pin<'A', 1, Output>
+      Pin<'A', 1, Output>,
     >,
     redraw_timer: CounterMs<TIM2>,
     fills: DisplayRedrawLocations,
@@ -103,11 +119,11 @@ mod app {
     rprintln!("init");
 
     let clocks = rcc
-        .cfgr
-        .hclk(72.MHz())
-        .sysclk(72.MHz())
-        .pclk2(72.MHz())
-        .freeze(&mut flash.acr);
+      .cfgr
+      .hclk(72.MHz())
+      .sysclk(72.MHz())
+      .pclk2(72.MHz())
+      .freeze(&mut flash.acr);
 
     let mut delay = cx.device.TIM3.delay_us(&clocks);
 
@@ -118,8 +134,8 @@ mod app {
     // Display initialization
     // PA8 - led light. Low is off
     let backlight = gpioa.pa8.into_alternate_push_pull(&mut gpioa.crh);
-    let mut backlight_pwm = Timer::new(cx.device.TIM1, &clocks)
-      .pwm_hz(backlight, &mut afio.mapr, 1.kHz());
+    let mut backlight_pwm =
+      Timer::new(cx.device.TIM1, &clocks).pwm_hz(backlight, &mut afio.mapr, 1.kHz());
 
     let max = backlight_pwm.get_max_duty();
     backlight_pwm.enable(stm32f1xx_hal::timer::Channel::C1);
@@ -128,8 +144,12 @@ mod app {
     let sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl);
     let mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl);
     let cs = gpioa.pa3.into_push_pull_output(&mut gpioa.crl);
-    let rst = gpioa.pa1.into_push_pull_output_with_state(&mut gpioa.crl, PinState::High);
-    let dc = gpioa.pa2.into_push_pull_output_with_state(&mut gpioa.crl, PinState::High);
+    let rst = gpioa
+      .pa1
+      .into_push_pull_output_with_state(&mut gpioa.crl, PinState::High);
+    let dc = gpioa
+      .pa2
+      .into_push_pull_output_with_state(&mut gpioa.crl, PinState::High);
 
     let spi = Spi::spi1(
       cx.device.SPI1,
@@ -144,12 +164,12 @@ mod app {
 
     rprintln!("Display init");
     let mut display = Builder::st7789(di)
-        .with_display_size(240, 240)
-        .with_orientation(mipidsi::Orientation::Portrait(false))
-        .with_invert_colors(mipidsi::ColorInversion::Inverted)
-        .with_color_order(mipidsi::ColorOrder::Rgb)
-        .init(&mut delay, Some(rst))
-        .unwrap();
+      .with_display_size(240, 240)
+      .with_orientation(mipidsi::Orientation::Portrait(false))
+      .with_invert_colors(mipidsi::ColorInversion::Inverted)
+      .with_color_order(mipidsi::ColorOrder::Rgb)
+      .init(&mut delay, Some(rst))
+      .unwrap();
 
     // Clear the display initially
     display.clear(Rgb565::RED).unwrap();
@@ -166,7 +186,9 @@ mod app {
       cx.device.I2C1,
       (pb6, pb7),
       &mut afio.mapr,
-      Mode::Standard { frequency: 100.kHz() },
+      Mode::Standard {
+        frequency: 100.kHz(),
+      },
       clocks,
       100,
       5,
@@ -220,12 +242,10 @@ mod app {
     (
       Shared {
         ina: InaValues {
-          bus: [0.0;3],
-          volt: [0.0;3],
+          bus: [0.0; 3],
+          volt: [0.0; 3],
         },
-        bq: BqValues {
-          temp: 0.0,
-        },
+        bq: BqValues { temp: 0.0 },
       },
       Local {
         bq4050,
@@ -249,10 +269,10 @@ mod app {
   #[idle()]
   fn idle(_: idle::Context) -> ! {
     loop {
-        // Now Wait For Interrupt is used instead of a busy-wait loop
-        // to allow MCU to sleep between interrupts
-        // https://developer.arm.com/documentation/ddi0406/c/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/WFI
-        rtic::export::wfi()
+      // Now Wait For Interrupt is used instead of a busy-wait loop
+      // to allow MCU to sleep between interrupts
+      // https://developer.arm.com/documentation/ddi0406/c/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/WFI
+      rtic::export::wfi()
     }
   }
 
@@ -314,7 +334,7 @@ mod app {
   fn redraw_timer_update(cx: redraw_timer_update::Context) {
     let display = cx.local.display;
     let fills = cx.local.fills;
-    let mut draw_data:DrawData = Default::default();
+    let mut draw_data: DrawData = Default::default();
     let timer = cx.local.redraw_timer;
 
     (cx.shared.bq, cx.shared.ina).lock(|bq, ina| {
@@ -328,18 +348,16 @@ mod app {
 
     fills.temp.draw(display).unwrap();
 
-    let buf = unsafe {&mut FMT_BUF };
-    let v = format_no_std::show(
-        buf,
-        format_args!("Temp: {:.2}", draw_data.pack_temp),
-    ).unwrap();
+    let buf = unsafe { &mut FMT_BUF };
+    let v = format_no_std::show(buf, format_args!("Temp: {:.2}", draw_data.pack_temp)).unwrap();
 
     Text::new(
       &v,
       Point::new(50, 50),
       MonoTextStyle::new(&FONT_9X18_BOLD, Rgb565::WHITE),
     )
-    .draw(display).unwrap();
+    .draw(display)
+    .unwrap();
 
     fills.temp = Text::new(
       &v,
