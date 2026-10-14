@@ -75,7 +75,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40ac3d0c0a542d0ab5521211f873f62706a7136df415676f676d347e5a41dd80"
 dependencies = [
  "bitflags",
- "embedded-hal",
+ "embedded-hal 0.2.7",
  "nb 1.1.0",
  "vcell",
 ]
@@ -107,7 +107,7 @@ dependencies = [
  "bare-metal 0.2.5",
  "bitfield",
  "critical-section",
- "embedded-hal",
+ "embedded-hal 0.2.7",
  "volatile-register",
 ]
 
@@ -221,7 +221,7 @@ checksum = "489378ad054862146fbd1f09f51d585ccbe4bd1e2feadcda2a13ac33f840e1a5"
 dependencies = [
  "byte-slice-cast",
  "display-interface",
- "embedded-hal",
+ "embedded-hal 0.2.7",
 ]
 
 [[package]]
@@ -289,6 +289,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-hal"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "361a90feb7004eca4019fb28352a9465666b24f840f5c3cddf0ff13920590b89"
+dependencies = [
+ "defmt",
+]
+
+[[package]]
 name = "embedded-layout"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -325,7 +334,7 @@ dependencies = [
  "dwt-systick-monotonic",
  "embedded-graphics",
  "embedded-graphics-framebuf",
- "embedded-hal",
+ "embedded-hal 1.0.0",
  "embedded-layout",
  "embedded-layout-macros",
  "format_no_std",
@@ -393,6 +402,8 @@ dependencies = [
  "embedded-graphics",
  "embedded-layout",
  "embedded-layout-macros",
+ "micromath",
+ "numtoa",
  "ryu",
 ]
 
@@ -429,7 +440,7 @@ name = "ina3221"
 version = "0.1.0"
 source = "git+https://github.com/kiranshila/INA3221.git#b243c8740bdce4c364183b6711b6577222b8f60b"
 dependencies = [
- "embedded-hal",
+ "embedded-hal 0.2.7",
  "packed_struct",
 ]
 
@@ -467,7 +478,7 @@ checksum = "46968d0e30e7753c3503248bc48b408f9cce2bfbaa522a33e13c9aafadc4ce43"
 dependencies = [
  "display-interface",
  "embedded-graphics-core",
- "embedded-hal",
+ "embedded-hal 0.2.7",
  "heapless",
  "nb 1.1.0",
 ]
@@ -495,6 +506,12 @@ checksum = "39e3200413f237f41ab11ad6d161bc7239c84dcb631773ccd7de3dfe4b5c267c"
 dependencies = [
  "autocfg",
 ]
+
+[[package]]
+name = "numtoa"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6aa2c4e539b869820a2b82e1aef6ff40aa85e65decdd5185e83fb4b1249cd00f"
 
 [[package]]
 name = "packed_struct"
@@ -534,9 +551,10 @@ dependencies = [
  "byteorder",
  "display-interface",
  "embedded-graphics",
- "embedded-hal",
+ "embedded-hal 1.0.0",
  "embedded-layout",
  "embedded-layout-macros",
+ "packed_struct",
 ]
 
 [[package]]
@@ -730,7 +748,7 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "embedded-dma",
- "embedded-hal",
+ "embedded-hal 0.2.7",
  "fugit",
  "fugit-timer",
  "nb 1.1.0",

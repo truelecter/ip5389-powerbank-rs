@@ -4,7 +4,7 @@ cargo-features = ["per-package-target"]
 name = "firmware"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "mit"
 forced-target = "thumbv7em-none-eabihf"
 
 [dependencies]
@@ -29,6 +29,7 @@ embedded-layout-macros.workspace = true
 embedded-graphics-framebuf.workspace = true
 
 stm32f1xx-hal.workspace = true
+# at32f4xx-hal.workspace = true
 
 ina3221.workspace = true
 byteorder.workspace = true

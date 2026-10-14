@@ -79,25 +79,25 @@ impl Batteries {
     Ok(self)
   }
 
-  pub fn set_voltage1(&mut self, voltage: f32) -> &Self {
+  pub fn set_voltage1(&mut self, voltage: f32) -> &mut Self {
     self.b1.set_voltage(voltage);
 
     self
   }
 
-  pub fn set_voltage2(&mut self, voltage: f32) -> &Self {
+  pub fn set_voltage2(&mut self, voltage: f32) -> &mut Self {
     self.b2.set_voltage(voltage);
 
     self
   }
 
-  pub fn set_voltage3(&mut self, voltage: f32) -> &Self {
+  pub fn set_voltage3(&mut self, voltage: f32) -> &mut Self {
     self.b3.set_voltage(voltage);
 
     self
   }
 
-  pub fn set_voltage4(&mut self, voltage: f32) -> &Self {
+  pub fn set_voltage4(&mut self, voltage: f32) -> &mut Self {
     self.b4.set_voltage(voltage);
 
     self
@@ -109,8 +109,7 @@ impl View for Batteries {
   fn translate_impl(&mut self, by: Point) {
     let top_left = self.bounds.top_left + by;
 
-    let (b1, b2, b3, b4, bounds) =
-      Self::generate_layout(top_left, self.bounds.size.width);
+    let (b1, b2, b3, b4, bounds) = Self::generate_layout(top_left, self.bounds.size.width);
 
     self.b1 = b1;
     self.b2 = b2;

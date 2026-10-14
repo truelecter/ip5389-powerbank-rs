@@ -43,7 +43,7 @@ unsafe fn preinit() -> () {
   // TODO - disable baclkight
 }
 
-#[app(device = stm32f1xx_hal::pac, peripherals = true)]
+#[app(device = at32f4xx_hal::pac, peripherals = true)]
 mod app {
   use super::*;
 

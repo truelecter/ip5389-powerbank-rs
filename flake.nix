@@ -2,7 +2,7 @@
   description = "Build a cargo project without extra checks";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs";
+    nixpkgs.url = "nixpkgs";
 
     crane = {
       url = "github:ipetkov/crane";
@@ -43,7 +43,6 @@
 
       craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
 
-      # Only keeps markdown files
       linkerFilter = path: _type: builtins.match ".*x$" path != null;
       linkerOrCargo = path: type:
         (linkerFilter path type) || (craneLib.filterCargoSources path type);
@@ -102,7 +101,7 @@
             cargo build --profile release
           '';
         };
-    in {
+    in rec {
       checks = {
         inherit firmware;
       };
@@ -131,5 +130,7 @@
           gcc-arm-embedded
         ];
       };
+
+      devShell = devShells.default;
     });
 }

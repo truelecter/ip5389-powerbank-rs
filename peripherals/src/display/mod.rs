@@ -11,8 +11,10 @@ use instruction::Instruction;
 use display_interface::DataFormat::{U16BEIter, U8Iter};
 use display_interface::WriteOnlyDataCommand;
 use embedded_graphics::pixelcolor::{Rgb565, RgbColor};
-use embedded_hal::blocking::delay::DelayUs;
-use embedded_hal::digital::v2::OutputPin;
+// use embedded_hal::blocking::delay::DelayUs;
+use embedded_hal::delay::DelayNs;
+// use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::digital::OutputPin;
 
 mod graphics;
 
@@ -122,7 +124,7 @@ where
   ///
   /// * `delay_source` - mutable reference to a delay provider
   ///
-  pub fn init(&mut self, delay_source: &mut impl DelayUs<u32>) -> Result<(), Error<PinE>> {
+  pub fn init(&mut self, delay_source: &mut impl DelayNs) -> Result<(), Error<PinE>> {
     self.hard_reset(delay_source)?;
     if let Some(bl) = self.bl.as_mut() {
       bl.set_low().map_err(Error::Pin)?;
@@ -157,7 +159,7 @@ where
   ///
   /// * `delay_source` - mutable reference to a delay provider
   ///
-  pub fn hard_reset(&mut self, delay_source: &mut impl DelayUs<u32>) -> Result<(), Error<PinE>> {
+  pub fn hard_reset(&mut self, delay_source: &mut impl DelayNs) -> Result<(), Error<PinE>> {
     if let Some(rst) = self.rst.as_mut() {
       rst.set_high().map_err(Error::Pin)?;
       delay_source.delay_us(10); // ensure the pin change will get registered
@@ -173,7 +175,7 @@ where
   pub fn set_backlight(
     &mut self,
     state: BacklightState,
-    delay_source: &mut impl DelayUs<u32>,
+    delay_source: &mut impl DelayNs,
   ) -> Result<(), Error<PinE>> {
     if let Some(bl) = self.bl.as_mut() {
       match state {

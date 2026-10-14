@@ -11,3 +11,5 @@ embedded-layout.workspace = true
 embedded-layout-macros.workspace = true
 display-interface.workspace = true
 ryu.workspace = true
+numtoa.workspace = true
+micromath.workspace = true

@@ -12,3 +12,4 @@ embedded-layout-macros.workspace = true
 display-interface.workspace = true
 
 byteorder.workspace = true
+packed_struct.workspace = true

@@ -86,6 +86,30 @@ impl<'a> VoltTable<'a> {
 
     Ok(())
   }
+
+  pub fn set_usb_values(&mut self, voltage: f32, current: f32, power: f32) -> &Self {
+    self.usb.update_values(voltage, current, power);
+
+    self
+  }
+
+  pub fn set_ext1_values(&mut self, voltage: f32, current: f32, power: f32) -> &Self {
+    self.ext1.update_values(voltage, current, power);
+
+    self
+  }
+
+  pub fn set_ext2_values(&mut self, voltage: f32, current: f32, power: f32) -> &Self {
+    self.ext2.update_values(voltage, current, power);
+
+    self
+  }
+
+  pub fn set_dc_values(&mut self, voltage: f32, current: f32, power: f32) -> &Self {
+    self.dc.update_values(voltage, current, power);
+
+    self
+  }
 }
 
 impl View for VoltTable<'_> {

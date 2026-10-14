@@ -1,5 +1,7 @@
 use byteorder::{ByteOrder, LittleEndian};
-use embedded_hal::blocking::i2c::{Read, Write, WriteRead};
+// use embedded_hal::i2c::Operation::{Read, Write};
+use embedded_hal::i2c::I2c;
+use packed_struct::prelude::*;
 
 /// I2C address
 #[derive(Copy, Clone)]
@@ -33,6 +35,48 @@ pub enum Cmd {
   CellVoltage1Reg = 0x3F,
   SohReg = 0x4F,
   SerialNumberReg = 0x1C,
+  DAStatus1 = 0x71,
+  DAStatus2 = 0x72,
+}
+
+#[derive(PackedStruct)]
+#[packed_struct(endian = "msb", size_bytes = "14")]
+pub struct DAStatus2 {
+  // #[packed_field(bits="0..=15")]
+  pub int_temperature: Integer<u16, packed_bits::Bits::<16>>,
+  // #[packed_field(bits="16..=31")]
+  pub ts1_temperature: Integer<u16, packed_bits::Bits::<16>>,
+  // #[packed_field(bits="32..=47")]
+  pub ts2_temperature: Integer<u16, packed_bits::Bits::<16>>,
+  // #[packed_field(bits="48..=63")]
+  pub ts3_temperature: Integer<u16, packed_bits::Bits::<16>>,
+  // #[packed_field(bits="64..=79")]
+  pub ts4_temperature: Integer<u16, packed_bits::Bits::<16>>,
+  // #[packed_field(bits="80..=95")]
+  pub cell_temperature: Integer<u16, packed_bits::Bits::<16>>,
+  // #[packed_field(bits="96..=111")]
+  pub fet_temperature: Integer<u16, packed_bits::Bits::<16>>,
+}
+
+#[derive(PackedStruct)]
+#[packed_struct(endian = "msb", size_bytes = "32")]
+pub struct DAStatus1 {
+  pub cell_voltage_1: Integer<u16, packed_bits::Bits::<16>>,
+  pub cell_voltage_2: Integer<u16, packed_bits::Bits::<16>>,
+  pub cell_voltage_3: Integer<u16, packed_bits::Bits::<16>>,
+  pub cell_voltage_4: Integer<u16, packed_bits::Bits::<16>>,
+  pub bat_voltage: Integer<u16, packed_bits::Bits::<16>>,
+  pub pack_voltage: Integer<u16, packed_bits::Bits::<16>>,
+  pub cell_current_1: Integer<u16, packed_bits::Bits::<16>>,
+  pub cell_current_2: Integer<u16, packed_bits::Bits::<16>>,
+  pub cell_current_3: Integer<u16, packed_bits::Bits::<16>>,
+  pub cell_current_4: Integer<u16, packed_bits::Bits::<16>>,
+  pub cell_power_1: Integer<u16, packed_bits::Bits::<16>>,
+  pub cell_power_2: Integer<u16, packed_bits::Bits::<16>>,
+  pub cell_power_3: Integer<u16, packed_bits::Bits::<16>>,
+  pub cell_power_4: Integer<u16, packed_bits::Bits::<16>>,
+  pub power: Integer<u16, packed_bits::Bits::<16>>,
+  pub average_power: Integer<u16, packed_bits::Bits::<16>>,
 }
 
 // Read word
@@ -52,7 +96,7 @@ pub struct BQ4050<I2C> {
 
 impl<I2C, I2cError> BQ4050<I2C>
 where
-  I2C: WriteRead<Error = I2cError> + Write<Error = I2cError> + Read<Error = I2cError>,
+  I2C: I2c<Error = I2cError>,
 {
   pub fn new(i2c: I2C) -> BQ4050<I2C> {
     BQ4050 { i2c: i2c }
@@ -100,17 +144,24 @@ where
   // Unit - 0.1°K
   pub fn get_temperature(&mut self) -> Result<f32, Error<I2cError>> {
     let mut buffer = [0u8; 2];
-    self.int_rw(
-      Address::Dev as u8,
-      &[Cmd::TemperatureReg as u8],
-      &mut buffer,
-    )?;
-    // self.i2c.write_read(
-    //     Address::Dev as u8,
-    //     &[Cmd::TemperatureReg as u8],
-    //     &mut buffer,
+    // self.int_rw(
+    //   Address::Dev as u8,
+    //   &[Cmd::TemperatureReg as u8],
+    //   &mut buffer,
     // )?;
-    Ok(convert_temperature(LittleEndian::read_u16(&buffer[0..2])))
+    self.i2c.write_read(
+        Address::Dev as u8,
+        &[Cmd::TemperatureReg as u8],
+        &mut buffer,
+    )?;
+
+    let r = convert_temperature(LittleEndian::read_u16(&buffer[0..2]));
+
+    if r > 50.0 {
+      let a = 1 + 1;
+    }
+
+    Ok(r)
   }
 
   fn int_rw(
@@ -256,6 +307,22 @@ where
   // Protocol - Word
   // Unit - cycles
   // ---
+  pub fn get_cycle_count(&mut self) -> Result<u16, Error<I2cError>> {
+    let mut buffer = [0u8; 2];
+    self.i2c.write_read(
+      Address::Dev as u8,
+      &[Cmd::CycleCountReg as u8],
+      &mut buffer,
+    )?;
+
+    // self.int_rw(
+    //   Address::Dev as u8,
+    //   &[Cmd::CycleCountReg as u8],
+    //   &mut buffer,
+    // )?;
+
+    Ok(LittleEndian::read_u16(&buffer[0..2]))
+  }
 
   // 13.25 0x18 DesignCapacity()
   // This read-word function returns the theoretical pack capacity.
@@ -523,10 +590,37 @@ where
   // For a description of returned data values, see the ManufacturerAccess() versionoft he samecomm and in Section 13.1.
   // Protocol - Block
   // ---
+  pub fn get_da_status_1(&mut self) -> Result<DAStatus1, Error<I2cError>> {
+    let mut buffer = [0u8; 32];
+
+    self.i2c.write_read(
+      Address::Dev as u8,
+      &[Cmd::DAStatus1 as u8],
+      &mut buffer,
+    )?;
+
+    Ok(DAStatus1::unpack(&buffer).unwrap())
+  }
   // 13.65 0x72 DAStatus2
   // This command returns the internal temp sensor, TS1, TS2, TS3, TS4, Cell Temp, and FET Temp.
   // For a description of returned data values, see theManufacturerAccess() version of the same command in Section 13.1.
   // Protocol - Block
+  pub fn get_da_status_2(&mut self) -> Result<DAStatus2, Error<I2cError>> {
+    let mut buffer = [0u8; 14];
+    self.i2c.write_read(
+      Address::Dev as u8,
+      &[Cmd::DAStatus2 as u8],
+      &mut buffer,
+    )?;
+    // self.int_rw(
+    //   Address::Dev as u8,
+    //   &[Cmd::DAStatus2 as u8],
+    //   &mut buffer,
+    // )?;
+
+    // let unpacked =;
+    Ok(DAStatus2::unpack(&buffer).unwrap())
+  }
   // ---
   // 13.66 0x73 GaugeStatus1
   // This commandinstructsthe deviceto return Impedance Track related gauging information.

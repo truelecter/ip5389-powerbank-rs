@@ -5,6 +5,9 @@ target = "thumbv7em-none-eabihf"
 # runner = 'probe-rs run --chip AT32F403ACGU7'
 rustflags = [
   "-C", "link-arg=-Tlink.x",
+  # This is needed if your flash or ram addresses are not aligned to 0x10000 in memory.x
+  # See https://github.com/rust-embedded/cortex-m-quickstart/pull/95
+  "-C", "link-arg=--nmagic",
   # Previously, the linker arguments --nmagic and -Tlink.x were set here.
   # They are now set by build.rs instead. The linker argument can still
   # only be set here, if a custom linker is needed.

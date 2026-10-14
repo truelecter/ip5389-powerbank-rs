@@ -6,7 +6,7 @@ use embedded_graphics::{
 };
 use embedded_graphics::{prelude::OriginDimensions, Pixel};
 
-use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::digital::OutputPin;
 
 use display_interface::WriteOnlyDataCommand;
 

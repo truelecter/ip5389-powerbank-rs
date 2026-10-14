@@ -1,14 +1,13 @@
 {
   "rust-analyzer.check.allTargets": false,
   "nixEnvSelector.suggestion": true,
-  "nixEnvSelector.nixFile": "${workspaceRoot}/flake.nix",
+  // "nixEnvSelector.nixFile": "${workspaceRoot}/flake.nix",
   "rust-analyzer.linkedProjects": [
     "./emulation/Cargo.toml",
     "./Cargo.toml",
   ],
   "rust-analyzer.rustfmt.rangeFormatting.enable": true,
   "lldb.displayFormat": "auto",
-  "lldb.showDisassembly": "always",
   "lldb.dereferencePointers": true,
   "lldb.consoleMode": "commands",
 }
