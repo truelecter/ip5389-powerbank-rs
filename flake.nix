@@ -4,10 +4,7 @@
   inputs = {
     nixpkgs.url = "nixpkgs";
 
-    crane = {
-      url = "github:ipetkov/crane";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    crane.url = "github:ipetkov/crane";
 
     fenix = {
       url = "github:nix-community/fenix";
@@ -47,31 +44,37 @@
       linkerOrCargo = path: type:
         (linkerFilter path type) || (craneLib.filterCargoSources path type);
 
-      firmware =
-        craneLib.buildPackage
-        {
-          inherit (craneLib.crateNameFromCargoToml {cargoToml = ./firmware/Cargo.toml;}) pname version;
+      firmwareArgs = {
+        inherit (craneLib.crateNameFromCargoToml {cargoToml = ./firmware/Cargo.toml;}) pname version;
 
-          src = pkgs.lib.cleanSourceWith {
-            src = craneLib.path ./.;
-            filter = linkerOrCargo;
-          };
-          strictDeps = true;
-
-          cargoExtraArgs = "--target thumbv7em-none-eabihf";
-          doCheck = false;
-
-          buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
-            # Additional darwin specific inputs can be set here
-            pkgs.libiconv
-            pkgs.darwin.IOKit
-          ];
-
-          extraDummyScript = ''
-            cp -a ${./memory.x} $out/memory.x
-            rm -rf $out/src/bin/crane-dummy-*
-          '';
+        src = pkgs.lib.cleanSourceWith {
+          src = craneLib.path ./.;
+          filter = linkerOrCargo;
         };
+        strictDeps = true;
+
+        cargoExtraArgs = "--target thumbv7em-none-eabihf";
+        doCheck = false;
+
+        buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
+          # Additional darwin specific inputs can be set here
+          pkgs.libiconv
+        ];
+
+        extraDummyScript = ''
+          cp -a ${./memory.x} $out/memory.x
+        '';
+      };
+
+      firmware = craneLib.buildPackage (firmwareArgs
+        // {
+          # The dummy binaries crane builds dependencies with don't link against cortex-m-rt's
+          # linker script, so only build libraries in that step
+          cargoArtifacts = craneLib.buildDepsOnly (firmwareArgs
+            // {
+              cargoExtraArgs = "${firmwareArgs.cargoExtraArgs} --lib";
+            });
+        });
 
       emulator =
         craneLib.buildPackage
@@ -83,22 +86,31 @@
             filter = linkerOrCargo;
           };
           strictDeps = true;
+          # emulation is its own workspace with its own lock file
+          cargoVendorDir = craneLib.vendorMultipleCargoDeps {
+            cargoLockList = [./Cargo.lock ./emulation/Cargo.lock];
+          };
           buildInputs =
             [
               # Add additional build inputs here
               pkgs.SDL2
             ]
-            ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+            ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
               # Additional darwin specific inputs can be set here
               pkgs.libiconv
-              pkgs.darwin.IOKit
             ];
 
           doCheck = false;
 
-          cargoBuildCommand = ''
-            cd emulation
-            cargo build --profile release
+          # emulation is its own workspace (and builds for the host). Crane's dependency-only
+          # step doesn't carry its lock file over, so build everything in one step.
+          cargoArtifacts = null;
+          cargoBuildCommand = "cargoWithProfile build --manifest-path emulation/Cargo.toml";
+          # Crane only installs binaries of the workspace `cargo metadata` reports from the
+          # current directory
+          installPhaseCommand = ''
+            log="$(realpath "$cargoBuildLog")"
+            (cd emulation && installFromCargoBuildLog "$out" "$log")
           '';
         };
     in rec {
@@ -123,9 +135,8 @@
 
         packages = with pkgs; [
           pkgs.SDL2
-          darwin.IOKit
           pkgs.libiconv
-          probe-rs
+          probe-rs-tools
           rust-analyzer
           gcc-arm-embedded
         ];

@@ -1,7 +1,8 @@
 #![no_std]
 #![no_main]
 use cortex_m::peripheral::DWT;
-use display_interface_spi::SPIInterface;
+use embedded_hal::delay::DelayNs;
+use embedded_hal_bus::spi::ExclusiveDevice;
 
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
 
@@ -11,14 +12,20 @@ use panic_rtt_target as _;
 use rtt_target::{rprintln, rtt_init_print};
 
 use stm32f1xx_hal::{
-  i2c::{BlockingI2c, Mode, DutyCycle},
-  pac::Peripherals,
+  i2c::{BlockingI2c, DutyCycle, Mode},
+  pac::{Peripherals, SPI1},
   prelude::*,
-  spi::{NoMiso, Spi},
+  rcc,
+  spi::SpiExt,
 };
 
-use mipidsi::Builder;
-use peripherals::{self, bq4050};
+use mipidsi::{
+  interface::SpiInterface,
+  models::ST7789,
+  options::{ColorInversion, ColorOrder, Orientation},
+  Builder,
+};
+use peripherals::{bq4050, ina3221, soft_i2c::SoftI2c};
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -29,13 +36,16 @@ fn main() -> ! {
   let dp = Peripherals::take().unwrap();
 
   let mut flash = dp.FLASH.constrain();
-  let rcc = dp.RCC.constrain();
 
-  let clocks = rcc
-    .cfgr
-    .hclk(72.MHz())
-    .sysclk(72.MHz())
-    .freeze(&mut flash.acr);
+  // HICK/2 * 60 = 240 MHz, APB1 and APB2 at their 120 MHz maximum
+  let mut rcc = dp.RCC.freeze(
+    rcc::Config::hsi()
+      .sysclk(240.MHz())
+      .hclk(240.MHz())
+      .pclk1(120.MHz())
+      .pclk2(120.MHz()),
+    &mut flash.acr,
+  );
 
   unsafe {
     let demcr = 0xE000EDFC as *mut u32;
@@ -45,11 +55,10 @@ fn main() -> ! {
     demcr.write_volatile(new);
   }
 
-  let mut delay = cp.SYST.delay(&clocks);
+  let mut delay = cp.SYST.delay(&rcc.clocks);
 
-  let mut afio = dp.AFIO.constrain();
-  let mut gpioa = dp.GPIOA.split();
-  let mut gpiob = dp.GPIOB.split();
+  let mut gpioa = dp.GPIOA.split(&mut rcc);
+  let mut gpiob = dp.GPIOB.split(&mut rcc);
 
   rprintln!("dwt {}", DWT::cycle_count());
 
@@ -58,13 +67,12 @@ fn main() -> ! {
   let mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl);
   let cs = gpioa.pa3.into_push_pull_output(&mut gpioa.crl);
 
-  let spi = Spi::spi1(
-    dp.SPI1,
-    (sck, NoMiso, mosi),
-    &mut afio.mapr,
-    embedded_hal::spi::MODE_3,
-    48.MHz(),
-    clocks,
+  // APB2 120 MHz / 4
+  let spi = dp.SPI1.spi(
+    (Some(sck), SPI1::NoMiso, Some(mosi)),
+    embedded_hal::spi::MODE_3.into(),
+    30.MHz(),
+    &mut rcc,
   );
 
   rprintln!("dwt {}", DWT::cycle_count());
@@ -77,13 +85,16 @@ fn main() -> ! {
     .pa2
     .into_push_pull_output_with_state(&mut gpioa.crl, stm32f1xx_hal::gpio::PinState::High);
 
-  let di = SPIInterface::new(spi, dc, cs);
-  let mut display = Builder::st7789(di)
-    .with_display_size(240, 240)
-    .with_orientation(mipidsi::Orientation::Portrait(false))
-    .with_invert_colors(mipidsi::ColorInversion::Inverted)
-    .with_color_order(mipidsi::ColorOrder::Rgb)
-    .init(&mut delay, Some(rst))
+  let spi = ExclusiveDevice::new_no_delay(spi, cs).unwrap();
+  let mut display_buffer = [0u8; 512];
+  let di = SpiInterface::new(spi, dc, &mut display_buffer);
+  let mut display = Builder::new(ST7789, di)
+    .display_size(240, 240)
+    .orientation(Orientation::new())
+    .invert_colors(ColorInversion::Inverted)
+    .color_order(ColorOrder::Rgb)
+    .reset_pin(rst)
+    .init(&mut delay)
     .unwrap();
 
   rprintln!("Display Init");
@@ -96,38 +107,26 @@ fn main() -> ! {
   table.draw(&mut display).unwrap();
 
   rprintln!("BQ4050 init");
-  // look into https://github.com/cs2dsb/i2c_hung_fix.rs/blob/master/src/lib.rs for freeze fix
-  let pb10 = gpiob.pb10.into_alternate_open_drain(&mut gpiob.crh);
-  let pb11 = gpiob.pb11.into_alternate_open_drain(&mut gpiob.crh);
+  // Bit-banged: the I2C peripheral garbles reads while the BQ4050 stretches the clock
+  let scl = gpiob
+    .pb10
+    .into_open_drain_output_with_state(&mut gpiob.crh, stm32f1xx_hal::gpio::PinState::High);
+  let sda = gpiob
+    .pb11
+    .into_open_drain_output_with_state(&mut gpiob.crh, stm32f1xx_hal::gpio::PinState::High);
+  let smbus = SoftI2c::new(scl, sda, dp.TIM3.delay_us(&mut rcc), 100_000);
 
-  let i2c2 = BlockingI2c::i2c2(
-    dp.I2C2,
-    (pb10, pb11),
-    Mode::Standard {
-      frequency: 100.kHz(),
-    },
-    clocks,
-    100_000,
-    5,
-    100_000,
-    100_000,
-  );
-
-  let mut bq4050 = bq4050::BQ4050::new(i2c2);
+  let mut bq4050 = bq4050::BQ4050::new(smbus);
   rprintln!("BQ4050 init finished");
 
-  let pb6 = gpiob.pb6.into_alternate_open_drain(&mut gpiob.crl);
-  let pb7 = gpiob.pb7.into_alternate_open_drain(&mut gpiob.crl);
-
-  let i2c = BlockingI2c::i2c1(
+  let i2c = BlockingI2c::new(
     dp.I2C1,
-    (pb6, pb7),
-    &mut afio.mapr,
+    (gpiob.pb6, gpiob.pb7),
     // Mode::Standard {
     //   frequency: 100.kHz(),
     // },
-    Mode::Fast { frequency: 400_i32.kHz(), duty_cycle: DutyCycle::Ratio2to1 },
-    clocks,
+    Mode::Fast { frequency: 400.kHz(), duty_cycle: DutyCycle::Ratio2to1 },
+    &mut rcc,
     50_000,
     5,
     20_000,
@@ -145,39 +144,55 @@ fn main() -> ! {
 
   loop {
     match ina3221.bus_voltage(ina3221::Channel::Ch1) {
-      Ok(v) => rprintln!("b1 {}", v),
-      Err(e) => rprintln!("{:#?}", e),
+      Ok(v) => { rprintln!("b1 {}", v); }
+      Err(e) => { rprintln!("{:#?}", e); }
     };
 
     match ina3221.bus_voltage(ina3221::Channel::Ch2) {
-      Ok(v) => rprintln!("b2 {}", v),
-      Err(e) => rprintln!("{:#?}", e),
+      Ok(v) => { rprintln!("b2 {}", v); }
+      Err(e) => { rprintln!("{:#?}", e); }
     };
 
     match ina3221.bus_voltage(ina3221::Channel::Ch3) {
-      Ok(v) => rprintln!("b3 {}", v),
-      Err(e) => rprintln!("{:#?}", e),
+      Ok(v) => { rprintln!("b3 {}", v); }
+      Err(e) => { rprintln!("{:#?}", e); }
     };
 
     match ina3221.shunt_voltage(ina3221::Channel::Ch1) {
-      Ok(v) => rprintln!("s1 {}", v),
-      Err(e) => rprintln!("{:#?}", e),
+      Ok(v) => { rprintln!("s1 {}", v); }
+      Err(e) => { rprintln!("{:#?}", e); }
     };
 
     match ina3221.shunt_voltage(ina3221::Channel::Ch2) {
-      Ok(v) => rprintln!("s2 {}", v),
-      Err(e) => rprintln!("{:#?}", e),
+      Ok(v) => { rprintln!("s2 {}", v); }
+      Err(e) => { rprintln!("{:#?}", e); }
     };
 
     match ina3221.shunt_voltage(ina3221::Channel::Ch3) {
-      Ok(v) => rprintln!("s3 {}", v),
-      Err(e) => rprintln!("{:#?}", e),
+      Ok(v) => { rprintln!("s3 {}", v); }
+      Err(e) => { rprintln!("{:#?}", e); }
     };
 
-    // match bq4050.get_temperature() {
-    //   Ok(temp) => rprintln!("temp {}", temp),
-    //   Err(e) => rprintln!("{:#?}", e),
-    // };
+    match bq4050.get_temperature() {
+      Ok(temp) => { rprintln!("temp {}", temp); }
+      Err(e) => { rprintln!("temp {:?}", e); }
+    };
+    match bq4050.get_voltage() {
+      Ok(v) => { rprintln!("voltage {} mV", v); }
+      Err(e) => { rprintln!("voltage {:?}", e); }
+    };
+    match bq4050.get_current() {
+      Ok(v) => { rprintln!("current {} mA", v); }
+      Err(e) => { rprintln!("current {:?}", e); }
+    };
+    match bq4050.get_relative_state_of_charge() {
+      Ok(v) => { rprintln!("rsoc {} %", v); }
+      Err(e) => { rprintln!("rsoc {:?}", e); }
+    };
+    match (bq4050.get_cell_voltage_1(), bq4050.get_cell_voltage_2(), bq4050.get_cell_voltage_3(), bq4050.get_cell_voltage_4()) {
+      (Ok(a), Ok(b), Ok(c), Ok(d)) => { rprintln!("cells {} {} {} {} mV", a, b, c, d); }
+      e => { rprintln!("cells {:?}", (e.0.err(), e.1.err(), e.2.err(), e.3.err())); }
+    };
 
     match bq4050.get_da_status_2() {
       Ok(temp) => {
@@ -189,9 +204,9 @@ fn main() -> ! {
         rprintln!("fet_temp {}", temp.fet_temperature);
         rprintln!("int_temp 0b{:b} => {}", Into::<u16>::into(temp.int_temperature), Into::<u16>::into(temp.int_temperature));
       },
-      Err(e) => rprintln!("{:#?}", e),
+      Err(e) => { rprintln!("{:#?}", e); }
     };
-    delay.delay_ms(50 as u16);
+    DelayNs::delay_ms(&mut delay, 50);
 
     match bq4050.get_da_status_1() {
       Ok(temp) => {
@@ -212,7 +227,7 @@ fn main() -> ! {
         rprintln!("power {}", temp.power);
         rprintln!("average_power {}", temp.average_power);
       },
-      Err(e) => rprintln!("{:#?}", e),
+      Err(e) => { rprintln!("{:#?}", e); }
     };
     // match bq4050.get_cycle_count() {
     //   Ok(count) => {
@@ -221,6 +236,6 @@ fn main() -> ! {
     //   Err(e) => rprintln!("{:#?}", e),
     // };
 
-    delay.delay_ms(2000 as u16);
+    DelayNs::delay_ms(&mut delay, 2000);
   }
 }

@@ -8,32 +8,20 @@ license = "mit"
 forced-target = "thumbv7em-none-eabihf"
 
 [dependencies]
-defmt-rtt.workspace = true
 rtt-target.workspace = true
+panic-rtt-target.workspace = true
 
 cortex-m.workspace = true
-cortex-m-rtic.workspace = true
 cortex-m-rt.workspace = true
-critical-section.workspace = true
-systick-monotonic.workspace = true
-panic-rtt-target.workspace = true
-dwt-systick-monotonic.workspace = true
+rtic.workspace = true
 
 mipidsi.workspace = true
-display-interface.workspace = true
-display-interface-spi.workspace = true
 embedded-graphics.workspace = true
 embedded-hal.workspace = true
-embedded-layout.workspace = true
-embedded-layout-macros.workspace = true
-embedded-graphics-framebuf.workspace = true
+embedded-hal-bus.workspace = true
 
 stm32f1xx-hal.workspace = true
-# at32f4xx-hal.workspace = true
 
-ina3221.workspace = true
-byteorder.workspace = true
-arrform.workspace = true
 format_no_std.workspace = true
 
 peripherals.workspace = true
@@ -54,5 +42,17 @@ bench = false
 [[bin]]
 name = "unlock_ram"
 path = "src/unlock_ram.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "lock_ram"
+path = "src/lock_ram.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "fps"
+path = "src/fps.rs"
 test = false
 bench = false

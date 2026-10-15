@@ -7,8 +7,6 @@ edition = "2021"
 embedded-hal.workspace = true
 
 embedded-graphics.workspace = true
-embedded-layout.workspace = true
-embedded-layout-macros.workspace = true
 display-interface.workspace = true
 
 byteorder.workspace = true

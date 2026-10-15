@@ -39,8 +39,9 @@ pub enum Cmd {
   DAStatus2 = 0x72,
 }
 
+/// SBS words are little-endian. Temperatures in 0.1 K.
 #[derive(PackedStruct)]
-#[packed_struct(endian = "msb", size_bytes = "14")]
+#[packed_struct(endian = "lsb", size_bytes = "14")]
 pub struct DAStatus2 {
   // #[packed_field(bits="0..=15")]
   pub int_temperature: Integer<u16, packed_bits::Bits::<16>>,
@@ -58,8 +59,9 @@ pub struct DAStatus2 {
   pub fet_temperature: Integer<u16, packed_bits::Bits::<16>>,
 }
 
+/// SBS words are little-endian. Currents in mA, powers in cW, both signed.
 #[derive(PackedStruct)]
-#[packed_struct(endian = "msb", size_bytes = "32")]
+#[packed_struct(endian = "lsb", size_bytes = "32")]
 pub struct DAStatus1 {
   pub cell_voltage_1: Integer<u16, packed_bits::Bits::<16>>,
   pub cell_voltage_2: Integer<u16, packed_bits::Bits::<16>>,
@@ -67,16 +69,16 @@ pub struct DAStatus1 {
   pub cell_voltage_4: Integer<u16, packed_bits::Bits::<16>>,
   pub bat_voltage: Integer<u16, packed_bits::Bits::<16>>,
   pub pack_voltage: Integer<u16, packed_bits::Bits::<16>>,
-  pub cell_current_1: Integer<u16, packed_bits::Bits::<16>>,
-  pub cell_current_2: Integer<u16, packed_bits::Bits::<16>>,
-  pub cell_current_3: Integer<u16, packed_bits::Bits::<16>>,
-  pub cell_current_4: Integer<u16, packed_bits::Bits::<16>>,
-  pub cell_power_1: Integer<u16, packed_bits::Bits::<16>>,
-  pub cell_power_2: Integer<u16, packed_bits::Bits::<16>>,
-  pub cell_power_3: Integer<u16, packed_bits::Bits::<16>>,
-  pub cell_power_4: Integer<u16, packed_bits::Bits::<16>>,
-  pub power: Integer<u16, packed_bits::Bits::<16>>,
-  pub average_power: Integer<u16, packed_bits::Bits::<16>>,
+  pub cell_current_1: Integer<i16, packed_bits::Bits::<16>>,
+  pub cell_current_2: Integer<i16, packed_bits::Bits::<16>>,
+  pub cell_current_3: Integer<i16, packed_bits::Bits::<16>>,
+  pub cell_current_4: Integer<i16, packed_bits::Bits::<16>>,
+  pub cell_power_1: Integer<i16, packed_bits::Bits::<16>>,
+  pub cell_power_2: Integer<i16, packed_bits::Bits::<16>>,
+  pub cell_power_3: Integer<i16, packed_bits::Bits::<16>>,
+  pub cell_power_4: Integer<i16, packed_bits::Bits::<16>>,
+  pub power: Integer<i16, packed_bits::Bits::<16>>,
+  pub average_power: Integer<i16, packed_bits::Bits::<16>>,
 }
 
 // Read word
@@ -88,6 +90,9 @@ pub enum CmdBlock {
 #[derive(Clone, Copy, Debug)]
 pub enum Error<I2cError> {
   I2cError(I2cError),
+  /// A block read returned fewer bytes than the command has
+  BlockLength(u8),
+  Unpack(PackingError),
 }
 
 pub struct BQ4050<I2C> {
@@ -191,25 +196,25 @@ where
   // This read-word function returns the measured current from the coulomb counter.
   // If the input to the device exceeds the maximum value,the value is clamped at the maximum and does not roll over.
   // Protocol - Word
-  // Unit - mA
-  pub fn get_current(&mut self) -> Result<u16, Error<I2cError>> {
+  // Unit - mA, negative while discharging
+  pub fn get_current(&mut self) -> Result<i16, Error<I2cError>> {
     let mut buffer = [0u8; 2];
     self
       .i2c
       .write_read(Address::Dev as u8, &[Cmd::CurrentReg as u8], &mut buffer)?;
-    Ok(LittleEndian::read_u16(&buffer[0..2]))
+    Ok(LittleEndian::read_i16(&buffer[0..2]))
   }
   // 13.12 0x0B AverageCurrent()
   // Protocol - Word
   // Unit - mA
-  pub fn get_average_current(&mut self) -> Result<u16, Error<I2cError>> {
+  pub fn get_average_current(&mut self) -> Result<i16, Error<I2cError>> {
     let mut buffer = [0u8; 2];
     self.i2c.write_read(
       Address::Dev as u8,
       &[Cmd::AverageCurrentReg as u8],
       &mut buffer,
     )?;
-    Ok(LittleEndian::read_u16(&buffer[0..2]))
+    Ok(LittleEndian::read_i16(&buffer[0..2]))
   }
   // 13.13 0x0C MaxError()
   // This read-word function returns the expected margin of error, in %, in the state-of-charge calculation with a rangeof 1 to 100%.
@@ -591,35 +596,34 @@ where
   // Protocol - Block
   // ---
   pub fn get_da_status_1(&mut self) -> Result<DAStatus1, Error<I2cError>> {
-    let mut buffer = [0u8; 32];
+    let mut buffer = [0u8; 33];
+    let data = self.read_block(Cmd::DAStatus1, &mut buffer)?;
+    DAStatus1::unpack_from_slice(data).map_err(Error::Unpack)
+  }
 
-    self.i2c.write_read(
-      Address::Dev as u8,
-      &[Cmd::DAStatus1 as u8],
-      &mut buffer,
-    )?;
+  /// SMBus block read: the device sends the byte count first. Returns the data after it,
+  /// `buffer` is one byte longer than the expected data.
+  fn read_block<'b>(&mut self, cmd: Cmd, buffer: &'b mut [u8]) -> Result<&'b [u8], Error<I2cError>> {
+    self
+      .i2c
+      .write_read(Address::Dev as u8, &[cmd as u8], buffer)?;
 
-    Ok(DAStatus1::unpack(&buffer).unwrap())
+    let expected = buffer.len() - 1;
+    let count = buffer[0];
+    // Newer firmware may append fields, the start of the block stays the same
+    if (count as usize) < expected {
+      return Err(Error::BlockLength(count));
+    }
+    Ok(&buffer[1..])
   }
   // 13.65 0x72 DAStatus2
   // This command returns the internal temp sensor, TS1, TS2, TS3, TS4, Cell Temp, and FET Temp.
   // For a description of returned data values, see theManufacturerAccess() version of the same command in Section 13.1.
   // Protocol - Block
   pub fn get_da_status_2(&mut self) -> Result<DAStatus2, Error<I2cError>> {
-    let mut buffer = [0u8; 14];
-    self.i2c.write_read(
-      Address::Dev as u8,
-      &[Cmd::DAStatus2 as u8],
-      &mut buffer,
-    )?;
-    // self.int_rw(
-    //   Address::Dev as u8,
-    //   &[Cmd::DAStatus2 as u8],
-    //   &mut buffer,
-    // )?;
-
-    // let unpacked =;
-    Ok(DAStatus2::unpack(&buffer).unwrap())
+    let mut buffer = [0u8; 15];
+    let data = self.read_block(Cmd::DAStatus2, &mut buffer)?;
+    DAStatus2::unpack_from_slice(data).map_err(Error::Unpack)
   }
   // ---
   // 13.66 0x73 GaugeStatus1
@@ -661,5 +665,75 @@ fn convert_temperature(raw: u16) -> f32 {
 impl<E> From<E> for Error<E> {
   fn from(error: E) -> Self {
     Error::I2cError(error)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use embedded_hal::i2c::{ErrorKind, ErrorType, Operation};
+
+  /// Answers every read with `response`
+  struct FakeBus<'a> {
+    response: &'a [u8],
+  }
+
+  impl ErrorType for FakeBus<'_> {
+    type Error = ErrorKind;
+  }
+
+  impl I2c for FakeBus<'_> {
+    fn transaction(&mut self, _address: u8, operations: &mut [Operation<'_>]) -> Result<(), ErrorKind> {
+      for operation in operations {
+        if let Operation::Read(buffer) = operation {
+          buffer.copy_from_slice(&self.response[..buffer.len()]);
+        }
+      }
+      Ok(())
+    }
+  }
+
+  #[test]
+  fn da_status_1_skips_byte_count_and_reads_little_endian() {
+    let mut response = [0u8; 33];
+    response[0] = 32;
+    // cell voltage 1: 3700 mV
+    response[1..3].copy_from_slice(&3700u16.to_le_bytes());
+    // cell current 1: -1500 mA
+    response[13..15].copy_from_slice(&(-1500i16).to_le_bytes());
+    // average power: -250 cW
+    response[31..33].copy_from_slice(&(-250i16).to_le_bytes());
+
+    let status = BQ4050::new(FakeBus { response: &response }).get_da_status_1().unwrap();
+    assert_eq!(*status.cell_voltage_1, 3700);
+    assert_eq!(*status.cell_current_1, -1500);
+    assert_eq!(*status.average_power, -250);
+  }
+
+  #[test]
+  fn da_status_2_accepts_longer_blocks() {
+    let mut response = [0u8; 15];
+    // newer firmware reports an extra word
+    response[0] = 16;
+    response[1..3].copy_from_slice(&2982u16.to_le_bytes());
+
+    let status = BQ4050::new(FakeBus { response: &response }).get_da_status_2().unwrap();
+    assert_eq!(*status.int_temperature, 2982);
+  }
+
+  #[test]
+  fn short_block_is_an_error() {
+    let mut response = [0u8; 33];
+    response[0] = 14;
+
+    let result = BQ4050::new(FakeBus { response: &response }).get_da_status_1();
+    assert!(matches!(result, Err(Error::BlockLength(14))));
+  }
+
+  #[test]
+  fn current_is_signed() {
+    let response = (-1200i16).to_le_bytes();
+    let current = BQ4050::new(FakeBus { response: &response }).get_current().unwrap();
+    assert_eq!(current, -1200);
   }
 }

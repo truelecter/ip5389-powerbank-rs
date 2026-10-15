@@ -9,11 +9,10 @@ forced-target = "aarch64-apple-darwin"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-embedded-graphics-simulator = "0.6.0"
+embedded-graphics-simulator = "0.8.0"
 
-embedded-graphics = "0.8.1"
-embedded-layout = "0.4.1"
-embedded-layout-macros = "0.3.1"
+embedded-graphics = "0.8.2"
+embedded-layout = "0.4.2"
 
 graphics = { path = "../graphics" }
 

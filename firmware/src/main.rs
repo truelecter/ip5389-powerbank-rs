@@ -5,49 +5,76 @@
 
 use panic_rtt_target as _;
 
-use cortex_m_rt::pre_init;
 use rtic::app;
 use rtt_target::{rprintln, rtt_init_print};
-use systick_monotonic::Systick;
 
 use stm32f1xx_hal::{
   gpio::gpioa::PA0,
-  gpio::{Alternate, Edge, ExtiPin, Input, OpenDrain, Output, Pin, PinState, PullDown},
+  gpio::{Edge, ExtiPin, Input, OpenDrain, Output, Pin, PinState, PullDown},
   i2c::{BlockingI2c, Mode},
-  pac::{I2C1, I2C2, SPI1, TIM2, TIM4},
+  pac::{I2C1, SPI1, TIM2, TIM4},
   prelude::*,
-  spi::{NoMiso, Spi, Spi1NoRemap},
-  timer::CounterMs,
-  timer::Timer,
+  rcc,
+  spi::{Spi, SpiExt},
+  timer::{Channel, Counter, Event, Timer},
 };
 
+/// System clock, the AT32F403A maximum
+const SYSCLK_HZ: u32 = 240_000_000;
+/// Tick rate of the data and redraw timers. Low enough for a 16-bit prescaler at 240 MHz,
+/// high enough for a 16-bit counter to reach a second.
+const TIMER_HZ: u32 = 10_000;
+/// INA3221 I2C start, address and per-byte timeout
+const I2C_TIMEOUT_US: u32 = 35_000;
+/// BQ4050 SMBus clock, bit-banged: the I2C peripheral garbles reads while the BQ4050
+/// stretches the clock
+const SMBUS_HZ: u32 = 100_000;
+/// INA3221 shunt resistors, channels 1 to 3: the `R005` (5 mΩ) resistors in the output paths.
+/// Checked on USB2 charging a phone: 36.7 W measured here for 33 W at the port (about 90 %).
+const SHUNT_OHMS: [f32; 3] = [0.005; 3];
+/// Shunt reading with no current, per volt on the bus. It grows with the bus voltage (0.04 mV
+/// at 2.5 V, 0.28 mV at 16.4 V), so it most likely is the INA3221 input bias current through
+/// the board's input filter resistors. Uncorrected, an idle module shows 56–64 mA; with a
+/// phone charging on USB2 the battery current measured by the BQ4050 left no room for that.
+const SHUNT_OFFSET_PER_BUS_VOLT: [f32; 3] = [17.0e-6, 19.5e-6, 17.0e-6];
+/// Port on each INA3221 channel: left and right USB-C modules (checked with a meter), and the
+/// DC port (the remaining channel, not measured)
+const PORT_NAMES: [&str; 3] = ["USB1", "USB2", "DC"];
+
 // Display st7789(v?)
-use display_interface_spi::SPIInterface;
+use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
 use embedded_graphics::{
   draw_target::DrawTarget,
   geometry::Point,
-  mono_font::{ascii::FONT_9X18_BOLD, MonoTextStyle},
-  pixelcolor::{Rgb565, RgbColor},
-  text::Text,
-  Drawable,
+  mono_font::ascii::FONT_9X18_BOLD,
+  pixelcolor::{Rgb565, RgbColor, WebColors},
 };
-use mipidsi::{models::ST7789, Builder, Display};
+use graphics::textual::TextField;
+use mipidsi::{
+  interface::SpiInterface,
+  models::ST7789,
+  options::{ColorInversion, ColorOrder, Orientation},
+  Builder, Display,
+};
 
-use ina3221::INA3221;
+use peripherals::ina3221;
+use peripherals::ina3221::INA3221;
 
 use peripherals::bq4050;
 use peripherals::bq4050::BQ4050;
+use peripherals::soft_i2c::{self, SoftI2c};
 
-#[pre_init]
-unsafe fn preinit() -> () {
+use cortex_m::delay::Delay;
+
+/// Runs before RAM is initialized. Replaces the deprecated `#[cortex_m_rt::pre_init]`.
+#[unsafe(export_name = "__pre_init")]
+unsafe extern "C" fn preinit() {
   // TODO - disable baclkight
 }
 
-#[app(device = at32f4xx_hal::pac, peripherals = true)]
+#[app(device = stm32f1xx_hal::pac, peripherals = true)]
 mod app {
   use super::*;
-
-  static mut FMT_BUF: [u8; 64] = [0u8; 64];
 
   pub struct InaValues {
     bus: [f32; 3],
@@ -58,8 +85,33 @@ mod app {
     temp: f32,
   }
 
-  pub struct DisplayRedrawLocations {
-    temp: Text<'static, MonoTextStyle<'static, Rgb565>>,
+  /// Screen background, also the background of every text field
+  const BACKGROUND: Rgb565 = Rgb565::BLACK;
+  /// Characters per text line: 26 fit the display width
+  const LINE: usize = 25;
+
+  /// What the redraw task shows. Each field redraws only the characters that changed.
+  pub struct Screen {
+    temp: TextField<LINE>,
+    bus: [TextField<LINE>; 3],
+    /// Time since boot, changes every redraw: shows the firmware is alive
+    uptime: TextField<LINE>,
+    /// Redraws since boot; the redraw timer fires once a second
+    seconds: u32,
+  }
+
+  impl Screen {
+    fn new() -> Self {
+      let line = |row: i32| {
+        TextField::new(Point::new(12, 20 + row * 24), &FONT_9X18_BOLD, Rgb565::WHITE, BACKGROUND)
+      };
+      Self {
+        temp: line(0),
+        bus: [line(1), line(2), line(3)],
+        uptime: TextField::new(Point::new(12, 200), &FONT_9X18_BOLD, Rgb565::CSS_GRAY, BACKGROUND),
+        seconds: 0,
+      }
+    }
   }
 
   #[shared]
@@ -70,76 +122,68 @@ mod app {
 
   #[local]
   struct Local {
-    data_timer: CounterMs<TIM4>,
-    bq4050: BQ4050<
-      BlockingI2c<
-        I2C2,
-        (
-          Pin<'B', 10, Alternate<OpenDrain>>,
-          Pin<'B', 11, Alternate<OpenDrain>>,
-        ),
-      >,
-    >,
-    ina3221: INA3221<
-      BlockingI2c<
-        I2C1,
-        (
-          Pin<'B', 6, Alternate<OpenDrain>>,
-          Pin<'B', 7, Alternate<OpenDrain>>,
-        ),
-      >,
-    >,
+    data_timer: Counter<TIM4, TIMER_HZ>,
+    bq4050: BQ4050<SoftI2c<Pin<'B', 10, Output<OpenDrain>>, Pin<'B', 11, Output<OpenDrain>>, Delay>>,
+    ina3221: INA3221<BlockingI2c<I2C1>>,
 
     button: PA0<Input<PullDown>>,
 
     display: Display<
-      SPIInterface<
-        Spi<SPI1, Spi1NoRemap, (Pin<'A', 5, Alternate>, NoMiso, Pin<'A', 7, Alternate>), u8>,
+      SpiInterface<
+        'static,
+        ExclusiveDevice<Spi<SPI1, u8>, Pin<'A', 3, Output>, NoDelay>,
         Pin<'A', 2, Output>,
-        Pin<'A', 3, Output>,
       >,
       ST7789,
       Pin<'A', 1, Output>,
     >,
-    redraw_timer: CounterMs<TIM2>,
-    fills: DisplayRedrawLocations,
+    redraw_timer: Counter<TIM2, TIMER_HZ>,
+    screen: Screen,
   }
 
-  #[monotonic(binds = SysTick, default = true)]
-  type MonoTimer = Systick<1000>;
-
-  #[init]
-  fn init(mut cx: init::Context) -> (Shared, Local, init::Monotonics) {
+  #[init(local = [display_buffer: [u8; 512] = [0; 512]])]
+  fn init(mut cx: init::Context) -> (Shared, Local) {
     let mut flash = cx.device.FLASH.constrain();
-    let rcc = cx.device.RCC.constrain();
 
-    let mono = Systick::new(cx.core.SYST, 72_000_000);
+    // HICK/2 * 60 = 240 MHz, APB1 and APB2 at their 120 MHz maximum
+    let mut rcc = cx.device.RCC.freeze(
+      rcc::Config::hsi()
+        .sysclk(SYSCLK_HZ.Hz())
+        .hclk(SYSCLK_HZ.Hz())
+        .pclk1(120.MHz())
+        .pclk2(120.MHz()),
+      &mut flash.acr,
+    );
+    let clocks = rcc.clocks;
+
+    // BlockingI2c measures its timeouts with the DWT cycle counter
+    cx.core.DCB.enable_trace();
+    cx.core.DWT.enable_cycle_counter();
 
     rtt_init_print!();
-    rprintln!("init");
+    rprintln!(
+      "init: sysclk {} hclk {} pclk1 {} pclk2 {}",
+      clocks.sysclk(),
+      clocks.hclk(),
+      clocks.pclk1(),
+      clocks.pclk2()
+    );
 
-    let clocks = rcc
-      .cfgr
-      .hclk(72.MHz())
-      .sysclk(72.MHz())
-      .pclk2(72.MHz())
-      .freeze(&mut flash.acr);
+    let mut delay = cx.device.TIM3.delay_us(&mut rcc);
 
-    let mut delay = cx.device.TIM3.delay_us(&clocks);
-
-    let mut afio = cx.device.AFIO.constrain();
-    let mut gpioa = cx.device.GPIOA.split();
-    let mut gpiob = cx.device.GPIOB.split();
+    let mut afio = cx.device.AFIO.constrain(&mut rcc);
+    let mut gpioa = cx.device.GPIOA.split(&mut rcc);
+    let mut gpiob = cx.device.GPIOB.split(&mut rcc);
 
     // Display initialization
     // PA8 - led light. Low is off
     let backlight = gpioa.pa8.into_alternate_push_pull(&mut gpioa.crh);
     let mut backlight_pwm =
-      Timer::new(cx.device.TIM1, &clocks).pwm_hz(backlight, &mut afio.mapr, 1.kHz());
+      Timer::new(cx.device.TIM1, &mut rcc).pwm_hz(backlight, &mut afio.mapr, 1.kHz());
 
     let max = backlight_pwm.get_max_duty();
-    backlight_pwm.enable(stm32f1xx_hal::timer::Channel::C1);
-    backlight_pwm.set_duty(stm32f1xx_hal::timer::Channel::C1, max / 2);
+    backlight_pwm.enable(Channel::C1);
+    backlight_pwm.set_duty(Channel::C1, max / 2);
 
     let sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl);
     let mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl);
@@ -151,88 +195,86 @@ mod app {
       .pa2
       .into_push_pull_output_with_state(&mut gpioa.crl, PinState::High);
 
-    let spi = Spi::spi1(
-      cx.device.SPI1,
-      (sck, NoMiso, mosi),
-      &mut afio.mapr,
-      embedded_hal::spi::MODE_3,
-      48.MHz(),
-      clocks,
+    // APB2 120 MHz / 2, the fastest SPI1 clock. The ST7789 accepts writes up to about 62 MHz.
+    let spi = cx.device.SPI1.spi(
+      (Some(sck), SPI1::NoMiso, Some(mosi)),
+      embedded_hal::spi::MODE_3.into(),
+      60.MHz(),
+      &mut rcc,
     );
 
-    let di = SPIInterface::new(spi, dc, cs);
+    let spi = ExclusiveDevice::new_no_delay(spi, cs).unwrap();
+    let di = SpiInterface::new(spi, dc, cx.local.display_buffer);
 
     rprintln!("Display init");
-    let mut display = Builder::st7789(di)
-      .with_display_size(240, 240)
-      .with_orientation(mipidsi::Orientation::Portrait(false))
-      .with_invert_colors(mipidsi::ColorInversion::Inverted)
-      .with_color_order(mipidsi::ColorOrder::Rgb)
-      .init(&mut delay, Some(rst))
+    let mut display = Builder::new(ST7789, di)
+      .display_size(240, 240)
+      .orientation(Orientation::new())
+      .invert_colors(ColorInversion::Inverted)
+      .color_order(ColorOrder::Rgb)
+      .reset_pin(rst)
+      .init(&mut delay)
       .unwrap();
 
     // Clear the display initially
-    display.clear(Rgb565::RED).unwrap();
+    display.clear(BACKGROUND).unwrap();
 
     rprintln!("Display init finished");
 
-    // INA PB6 PB7
-    let pb6 = gpiob.pb6.into_alternate_open_drain(&mut gpiob.crl);
-    let pb7 = gpiob.pb7.into_alternate_open_drain(&mut gpiob.crl);
-
     rprintln!("INA3221 init");
 
-    let i2c = BlockingI2c::i2c1(
+    // A reset in the middle of a read can leave the INA3221 holding SDA low: clock it free
+    // on the bare pins before the I2C peripheral takes them
+    let mut scl = gpiob.pb6.into_open_drain_output_with_state(&mut gpiob.crl, PinState::High);
+    let mut sda = gpiob.pb7.into_open_drain_output_with_state(&mut gpiob.crl, PinState::High);
+    if let Err(e) = soft_i2c::recover_bus(&mut scl, &mut sda, &mut delay, 100_000) {
+      rprintln!("INA3221 bus recovery: {:?}", e);
+    }
+    let i2c = BlockingI2c::new(
       cx.device.I2C1,
-      (pb6, pb7),
-      &mut afio.mapr,
+      (scl.into_floating_input(&mut gpiob.crl), sda.into_floating_input(&mut gpiob.crl)),
       Mode::Standard {
         frequency: 100.kHz(),
       },
-      clocks,
-      100,
+      &mut rcc,
+      I2C_TIMEOUT_US,
       5,
-      20,
-      20,
+      I2C_TIMEOUT_US,
+      I2C_TIMEOUT_US,
     );
 
     let mut ina3221 = INA3221::new(i2c, ina3221::AddressPin::Gnd);
 
-    ina3221.reset().unwrap();
-    ina3221.enable_channel(ina3221::Channel::Ch1, true).unwrap();
-    ina3221.enable_channel(ina3221::Channel::Ch2, true).unwrap();
-    ina3221.enable_channel(ina3221::Channel::Ch3, true).unwrap();
+    // On failure the data task keeps reporting read errors, and the display keeps working
+    let setup = ina3221.reset().and_then(|()| {
+      [ina3221::Channel::Ch1, ina3221::Channel::Ch2, ina3221::Channel::Ch3]
+        .into_iter()
+        .try_for_each(|channel| ina3221.enable_channel(channel, true))
+    });
+    if let Err(e) = setup {
+      rprintln!("INA3221 setup: {:?}", e);
+    }
 
     rprintln!("INA3221 init finished");
 
     rprintln!("BQ4050 init");
-    // look into https://github.com/cs2dsb/i2c_hung_fix.rs/blob/master/src/lib.rs for freeze fix
-    let pb10 = gpiob.pb10.into_alternate_open_drain(&mut gpiob.crh);
-    let pb11 = gpiob.pb11.into_alternate_open_drain(&mut gpiob.crh);
+    let scl = gpiob.pb10.into_open_drain_output_with_state(&mut gpiob.crh, PinState::High);
+    let sda = gpiob.pb11.into_open_drain_output_with_state(&mut gpiob.crh, PinState::High);
+    let mut smbus = SoftI2c::new(scl, sda, Delay::new(cx.core.SYST, SYSCLK_HZ), SMBUS_HZ);
+    if let Err(e) = smbus.recover() {
+      rprintln!("BQ4050 bus recovery: {:?}", e);
+    }
 
-    let i2c2 = BlockingI2c::i2c2(
-      cx.device.I2C2,
-      (pb10, pb11),
-      Mode::Standard {
-        frequency: 100.kHz(),
-      },
-      clocks,
-      20,
-      1,
-      20,
-      20,
-    );
-
-    let bq4050 = bq4050::BQ4050::new(i2c2);
+    let bq4050 = bq4050::BQ4050::new(smbus);
     rprintln!("BQ4050 init finished");
 
-    let mut data_timer = cx.device.TIM4.counter_ms(&clocks);
+    let mut data_timer = cx.device.TIM4.counter::<TIMER_HZ>(&mut rcc);
     data_timer.start(1.secs()).unwrap();
-    data_timer.listen(stm32f1xx_hal::timer::Event::Update);
+    data_timer.listen(Event::Update);
 
-    let mut redraw_timer = cx.device.TIM2.counter_ms(&clocks);
+    let mut redraw_timer = cx.device.TIM2.counter::<TIMER_HZ>(&mut rcc);
     redraw_timer.start(1.secs()).unwrap();
-    redraw_timer.listen(stm32f1xx_hal::timer::Event::Update);
+    redraw_timer.listen(Event::Update);
 
     let mut button = gpioa.pa0.into_pull_down_input(&mut gpioa.crl);
     button.make_interrupt_source(&mut afio);
@@ -254,15 +296,8 @@ mod app {
         redraw_timer,
         button,
         display,
-        fills: DisplayRedrawLocations {
-          temp: Text::new(
-            "",
-            Point::new(50, 50),
-            MonoTextStyle::new(&FONT_9X18_BOLD, Rgb565::WHITE),
-          ),
-        },
+        screen: Screen::new(),
       },
-      init::Monotonics(mono),
     )
   }
 
@@ -272,7 +307,7 @@ mod app {
       // Now Wait For Interrupt is used instead of a busy-wait loop
       // to allow MCU to sleep between interrupts
       // https://developer.arm.com/documentation/ddi0406/c/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/WFI
-      rtic::export::wfi()
+      cortex_m::asm::wfi()
     }
   }
 
@@ -285,37 +320,37 @@ mod app {
     (cx.shared.bq, cx.shared.ina).lock(|bq, ina| {
       match ina3221.bus_voltage(ina3221::Channel::Ch1) {
         Ok(v) => ina.bus[0] = v,
-        Err(e) => rprintln!("{:#?}", e),
+        Err(e) => { rprintln!("{:#?}", e); }
       };
 
       match ina3221.bus_voltage(ina3221::Channel::Ch2) {
         Ok(v) => ina.bus[1] = v,
-        Err(e) => rprintln!("{:#?}", e),
+        Err(e) => { rprintln!("{:#?}", e); }
       };
 
       match ina3221.bus_voltage(ina3221::Channel::Ch3) {
         Ok(v) => ina.bus[2] = v,
-        Err(e) => rprintln!("{:#?}", e),
+        Err(e) => { rprintln!("{:#?}", e); }
       };
 
       match ina3221.shunt_voltage(ina3221::Channel::Ch1) {
         Ok(v) => ina.volt[0] = v,
-        Err(e) => rprintln!("{:#?}", e),
+        Err(e) => { rprintln!("{:#?}", e); }
       };
 
       match ina3221.shunt_voltage(ina3221::Channel::Ch2) {
         Ok(v) => ina.volt[1] = v,
-        Err(e) => rprintln!("{:#?}", e),
+        Err(e) => { rprintln!("{:#?}", e); }
       };
 
       match ina3221.shunt_voltage(ina3221::Channel::Ch3) {
         Ok(v) => ina.volt[2] = v,
-        Err(e) => rprintln!("{:#?}", e),
+        Err(e) => { rprintln!("{:#?}", e); }
       };
 
       match bq4050.get_temperature() {
         Ok(temp) => bq.temp = temp,
-        Err(e) => rprintln!("{:#?}", e),
+        Err(e) => { rprintln!("{:#?}", e); }
       };
     });
 
@@ -330,10 +365,10 @@ mod app {
     volt: [f32; 3],
   }
 
-  #[task(priority = 2, binds = TIM2, shared = [ina, bq], local = [display, redraw_timer, fills])]
+  #[task(priority = 2, binds = TIM2, shared = [ina, bq], local = [display, redraw_timer, screen])]
   fn redraw_timer_update(cx: redraw_timer_update::Context) {
     let display = cx.local.display;
-    let fills = cx.local.fills;
+    let screen = cx.local.screen;
     let mut draw_data: DrawData = Default::default();
     let timer = cx.local.redraw_timer;
 
@@ -346,24 +381,35 @@ mod app {
       draw_data.pack_temp = bq.temp;
     });
 
-    fills.temp.draw(display).unwrap();
+    let start = cortex_m::peripheral::DWT::cycle_count();
+    let mut buf = [0u8; LINE];
+    let mut chars = 0;
 
-    let buf = unsafe { &mut FMT_BUF };
-    let v = format_no_std::show(buf, format_args!("Temp: {:.2}", draw_data.pack_temp)).unwrap();
+    let text = format_no_std::show(&mut buf, format_args!("Temp {:>9.2} C", draw_data.pack_temp));
+    chars += screen.temp.update(text.unwrap_or("Temp ?"), display).unwrap();
 
-    Text::new(
-      &v,
-      Point::new(50, 50),
-      MonoTextStyle::new(&FONT_9X18_BOLD, Rgb565::WHITE),
-    )
-    .draw(display)
-    .unwrap();
+    for (i, field) in screen.bus.iter_mut().enumerate() {
+      let amps = (draw_data.volt[i] - SHUNT_OFFSET_PER_BUS_VOLT[i] * draw_data.bus[i]) / SHUNT_OHMS[i];
+      let text = format_no_std::show(
+        &mut buf,
+        format_args!(
+          "{:<4}{:>6.2}V{:>7.3}A{:>5.1}W",
+          PORT_NAMES[i],
+          draw_data.bus[i],
+          amps,
+          draw_data.bus[i] * amps
+        ),
+      );
+      chars += field.update(text.unwrap_or("?"), display).unwrap();
+    }
 
-    fills.temp = Text::new(
-      &v,
-      Point::new(50, 50),
-      MonoTextStyle::new(&FONT_9X18_BOLD, Rgb565::BLACK),
-    );
+    let s = screen.seconds;
+    let text = format_no_std::show(&mut buf, format_args!("Up {}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60));
+    chars += screen.uptime.update(text.unwrap_or("Up ?"), display).unwrap();
+    screen.seconds = s.wrapping_add(1);
+
+    let us = cortex_m::peripheral::DWT::cycle_count().wrapping_sub(start) / (SYSCLK_HZ / 1_000_000);
+    rprintln!("redraw: {} chars in {} us", chars, us);
 
     let int = timer.get_interrupt();
     timer.clear_interrupt(int);
