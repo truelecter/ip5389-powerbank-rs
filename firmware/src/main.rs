@@ -37,8 +37,8 @@ const SHUNT_OHMS: [f32; 3] = [0.005; 3];
 /// the board's input filter resistors. Uncorrected, an idle module shows 56–64 mA; with a
 /// phone charging on USB2 the battery current measured by the BQ4050 left no room for that.
 const SHUNT_OFFSET_PER_BUS_VOLT: [f32; 3] = [17.0e-6, 19.5e-6, 17.0e-6];
-/// Port on each INA3221 channel: left and right USB-C modules (checked with a meter), and the
-/// DC port (the remaining channel, not measured)
+/// Port on each INA3221 channel: left and right USB-C modules and the DC port, each checked
+/// with a load
 const PORT_NAMES: [&str; 3] = ["USB1", "USB2", "DC"];
 
 // Display st7789(v?)
