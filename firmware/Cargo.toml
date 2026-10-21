@@ -26,6 +26,7 @@ format_no_std.workspace = true
 
 peripherals.workspace = true
 graphics.workspace = true
+power.workspace = true
 
 [[bin]]
 name = "firmware"

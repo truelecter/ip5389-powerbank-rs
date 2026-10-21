@@ -5,7 +5,8 @@ members = [
   "firmware",
   # "emulation",
   "graphics",
-  "peripherals"
+  "peripherals",
+  "power"
 ]
 exclude = ["vendor"]
 resolver = "2"
@@ -38,6 +39,7 @@ packed_struct = { version = "0.12.0", default-features = false }
 
 peripherals = { path = "peripherals" }
 graphics = { path = "graphics" }
+power = { path = "power" }
 
 [profile.dev]
 opt-level = 0
