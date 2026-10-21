@@ -1,6 +1,6 @@
 # stm32f1xx-hal 0.11.0 from crates.io, patched for the Artery AT32F403A (see the `at32f403a`
 # feature and README.md). Examples, dev-dependencies and the drivers this firmware doesn't use
-# (ADC, CAN, CRC, DAC, RTC, serial, USB) removed.
+# (ADC, CAN, CRC, DAC, serial, USB) removed.
 [package]
 edition = "2021"
 rust-version = "1.59"

@@ -254,7 +254,8 @@ impl Config {
 impl Rcc {
     /// Applies the clock configuration and returns a `Clocks` struct that signifies that the
     /// clocks are frozen, and contains the frequencies used. After this function is called,
-    /// the clocks can not change
+    /// the clocks can not change, except through [`reconfigure`](Self::reconfigure) on the
+    /// AT32F403A
     ///
     /// Usage:
     ///
@@ -266,7 +267,32 @@ impl Rcc {
     /// ```
     #[inline(always)]
     pub fn freeze(self, cfg: impl Into<RawConfig>, acr: &mut ACR) -> Self {
-        let cfg = cfg.into();
+        let clocks = Self::apply(cfg.into(), acr);
+        Self {
+            rb: self.rb,
+            clocks,
+        }
+    }
+
+    /// Changes the clock tree at runtime, for example to slow down while idle. The system clock
+    /// runs from HSI while the PLL is reprogrammed, and a configuration without the PLL leaves
+    /// it off.
+    ///
+    /// Peripherals keep the dividers they were set up with, so their clocks scale with the bus
+    /// clocks: set each one up for the configuration it is used in, and don't use it while the
+    /// clocks are switched. `self.clocks` is updated to the new frequencies.
+    #[cfg(feature = "at32f403a")]
+    pub fn reconfigure(&mut self, cfg: impl Into<RawConfig>, acr: &mut ACR) {
+        let rcc = unsafe { &*RCC::ptr() };
+        rcc.cfgr().modify(|_, w| unsafe { w.sw().bits(0) });
+        while rcc.cfgr().read().sws().bits() != 0 {}
+        rcc.cr().modify(|_, w| w.pllon().clear_bit());
+        while rcc.cr().read().pllrdy().bit_is_set() {}
+        self.clocks = Self::apply(cfg.into(), acr);
+    }
+
+    /// Programs the clock tree from reset state or from HSI with the PLL off
+    fn apply(cfg: RawConfig, acr: &mut ACR) -> Clocks {
         let clocks = cfg.get_clocks();
         // adjust flash wait states
         #[cfg(all(
@@ -413,10 +439,7 @@ impl Rcc {
             })
         });
 
-        Self {
-            rb: self.rb,
-            clocks,
-        }
+        clocks
     }
 }
 
