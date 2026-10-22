@@ -1,117 +1,50 @@
 use embedded_graphics::{
   draw_target::DrawTarget,
-  geometry::{Point, Size},
-  mono_font::{MonoTextStyleBuilder, ascii, MonoFont},
+  geometry::Point,
+  mono_font::{ascii, MonoFont},
   pixelcolor::{Rgb565, RgbColor},
-  primitives::
-    Rectangle
-  ,
-  text::Text,
-  Drawable,
 };
 
-use embedded_layout::{
-  View, layout::linear::{LinearLayout, FixedMargin}, object_chain::Chain, align::{Align, horizontal, vertical}}
-;
-
-use crate::utils::{float_to_fixed_with_suffix, to_integer_percents, float_to_fixed_with_suffix2};
+use crate::textual::format::{fixed, line};
+use crate::textual::{Align, Cell};
 
 const FONT: &MonoFont<'_> = &ascii::FONT_9X18_BOLD;
+/// Space between the three values
+const SPACING: u32 = 20;
 
+/// Pack voltage, state of charge and energy left in one line: `13.37V  89%  9.350Wh`
 pub struct Charge {
-  power: f32,
-  voltage: f32,
-  percents: f32,
-  bounds: Rectangle,
+  volts: Cell<6>,
+  percents: Cell<4>,
+  watt_hours: Cell<7>,
 }
 
 impl Charge {
-  pub fn new(top_left: Point) -> Self {
-    let height = FONT.character_size.height;
-    let width = FONT.character_size.width * (6 + 4 +  6) + 20 * 2;
-
-    let bounds = Rectangle::new(
-      top_left,
-      Size::new(width, height),
-    );
-
+  /// The line centered in `width`
+  pub fn new(top: Point, width: u32, background: Rgb565, highlight: Rgb565) -> Self {
+    let advance = FONT.character_size.width;
+    let total = (6 + 4 + 7) * advance + 2 * SPACING;
+    let x = top.x + ((width - total) / 2) as i32;
+    let at = |chars_before: u32, gaps: u32| Point::new(x + (chars_before * advance + gaps * SPACING) as i32, top.y);
     Self {
-      bounds,
-      power: 0.0,
-      voltage: 0.0,
-      percents: 0.0,
+      volts: cell(at(0, 0), background, highlight),
+      percents: cell(at(6, 1), background, highlight),
+      watt_hours: cell(at(10, 2), background, highlight),
     }
   }
 
-  pub fn draw_static<D: DrawTarget<Color = Rgb565>>(
-    &self,
-    _: &mut D,
-  ) -> Result<&Self, D::Error> {
-    Ok(self)
+  pub fn height() -> u32 {
+    FONT.character_size.height
   }
 
-  pub fn set_voltage(&mut self, voltage: f32) -> &mut Self {
-    self.voltage = voltage;
-
-    self
-  }
-
-  pub fn set_power(&mut self, power: f32) -> &mut Self {
-    self.power = power;
-
-    self
-  }
-
-  pub fn set_percents(&mut self, percents: f32) -> &mut Self {
-    self.percents = percents;
-
-    self
-  }
-}
-
-impl View for Charge {
-  #[inline]
-  fn translate_impl(&mut self, by: Point) {
-    // make sure you don't accidentally call `translate`!
-    self.bounds.translate_mut(by);
-  }
-
-  #[inline]
-  fn bounds(&self) -> Rectangle {
-    self.bounds
-  }
-}
-
-impl<'a> Drawable for Charge {
-  type Color = Rgb565;
-  type Output = ();
-
-  fn draw<D: DrawTarget<Color = Self::Color>>(&self, target: &mut D) -> Result<(), D::Error> {
-    let style = MonoTextStyleBuilder::new()
-      .background_color(Rgb565::BLACK)
-      .text_color(Rgb565::WHITE)
-      .font(&FONT)
-      .build();
-
-    let volts = float_to_fixed_with_suffix::<6>(self.voltage, b'V');
-    let volts = core::str::from_utf8(&volts).unwrap();
-
-    let percents = to_integer_percents(self.percents);
-    let percents = core::str::from_utf8(&percents).unwrap();
-
-    let watt_hours = float_to_fixed_with_suffix2::<7>(self.power, [b'W', b'h']);
-    let watt_hours = core::str::from_utf8(&watt_hours).unwrap();
-
-    LinearLayout::horizontal(
-      Chain::new(Text::new(volts, Point::zero(), style))
-        .append(Text::new(percents, Point::zero(), style))
-        .append(Text::new(watt_hours, Point::zero(), style))
-    )
-      .with_spacing(FixedMargin(20))
-      .arrange()
-      .align_to(&self.bounds, horizontal::Center, vertical::Center)
-      .draw(target)?;
-
+  pub fn update<D: DrawTarget<Color = Rgb565>>(&mut self, volts: f32, percents: u8, watt_hours: f32, target: &mut D) -> Result<(), D::Error> {
+    self.volts.update(fixed::<6>(volts, 2, "V").as_str(), target)?;
+    self.percents.update(line::<4>(format_args!("{percents}%")).as_str(), target)?;
+    self.watt_hours.update(fixed::<7>(watt_hours, 3, "Wh").as_str(), target)?;
     Ok(())
   }
+}
+
+fn cell<const N: usize>(top_left: Point, background: Rgb565, highlight: Rgb565) -> Cell<N> {
+  Cell::fitted(top_left, FONT, Align::Right, Rgb565::WHITE, background).with_highlight(highlight)
 }

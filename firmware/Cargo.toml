@@ -22,7 +22,6 @@ embedded-hal-bus.workspace = true
 
 stm32f1xx-hal.workspace = true
 
-format_no_std.workspace = true
 
 peripherals.workspace = true
 graphics.workspace = true
@@ -31,6 +30,24 @@ power.workspace = true
 [[bin]]
 name = "firmware"
 path = "src/main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "firmware-classic"
+path = "src/classic.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "firmware-dashboard"
+path = "src/dashboard.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "gauge"
+path = "src/gauge.rs"
 test = false
 bench = false
 

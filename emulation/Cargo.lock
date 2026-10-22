@@ -78,6 +78,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "display-interface"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ba2aab1ef3793e6f7804162debb5ac5edb93b3d650fbcc5aeb72fcd0e6c03a0"
+
+[[package]]
 name = "embedded-graphics"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -114,25 +120,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "embedded-layout"
-version = "0.4.2"
+name = "embedded-hal"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a90553247f2b05c59ac7894ea13d830636c2b1203fa03bff400eddbd1fa9f52"
-dependencies = [
- "embedded-graphics",
- "embedded-layout-macros",
-]
-
-[[package]]
-name = "embedded-layout-macros"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f6e621fe4c7e05b695274b722dc0a60bacd1c8696b58191baa0154713d52400"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
+checksum = "361a90feb7004eca4019fb28352a9465666b24f840f5c3cddf0ff13920590b89"
 
 [[package]]
 name = "emulation"
@@ -140,8 +131,9 @@ version = "0.1.0"
 dependencies = [
  "embedded-graphics",
  "embedded-graphics-simulator",
- "embedded-layout",
  "graphics",
+ "peripherals",
+ "power",
 ]
 
 [[package]]
@@ -178,10 +170,8 @@ name = "graphics"
 version = "0.1.0"
 dependencies = [
  "embedded-graphics",
- "embedded-layout",
- "micromath",
- "numtoa",
- "ryu",
+ "peripherals",
+ "power",
 ]
 
 [[package]]
@@ -261,12 +251,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "numtoa"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4c5b50317e17633b9db61959ab8a999c0f87d3884bc88716305b41e3d636d57"
-
-[[package]]
 name = "ouroboros"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -287,7 +271,38 @@ dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
  "quote",
- "syn",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "packed_struct"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6350910bce3c5f2a2499a60423ddc35d2c6c60ee3a2e756f92b521d3a99023c"
+dependencies = [
+ "packed_struct_codegen",
+]
+
+[[package]]
+name = "packed_struct_codegen"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b795fe0b7ff55c724fa9f0747fc101e937563f8d3ea0624254960bd5ea8895d3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
+]
+
+[[package]]
+name = "peripherals"
+version = "0.1.0"
+dependencies = [
+ "byteorder",
+ "display-interface",
+ "embedded-graphics",
+ "embedded-hal",
+ "packed_struct",
 ]
 
 [[package]]
@@ -302,6 +317,10 @@ dependencies = [
  "flate2",
  "miniz_oxide 0.8.9",
 ]
+
+[[package]]
+name = "power"
+version = "0.1.0"
 
 [[package]]
 name = "proc-macro2"
@@ -320,7 +339,7 @@ checksum = "af066a9c399a26e020ada66a034357a868728e72cd426f3adcd35f80d88d88c8"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.119",
  "version_check",
  "yansi",
 ]
@@ -339,12 +358,6 @@ checksum = "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
 dependencies = [
  "proc-macro2",
 ]
-
-[[package]]
-name = "ryu"
-version = "1.0.23"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "sdl2"
@@ -386,6 +399,17 @@ name = "syn"
 version = "2.0.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-ident",
+]
+
+[[package]]
+name = "syn"
+version = "3.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d78c8dee4c7bf0e14673097256fed6142ce9d3b85a408189d07482442145823b"
 dependencies = [
  "proc-macro2",
  "quote",

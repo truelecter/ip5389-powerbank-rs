@@ -10,6 +10,9 @@
 //! the measured ports and the board itself, see [`main_port_a`].
 #![no_std]
 
+pub mod button;
+pub mod learning;
+
 /// Seconds without a wake event before the backlight dims
 pub const DIM_AFTER_S: u32 = 15;
 /// Seconds without a wake event before the screen turns off, unless the pack charges

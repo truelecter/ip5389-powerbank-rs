@@ -2,147 +2,45 @@ use embedded_graphics::{
   draw_target::DrawTarget,
   geometry::{Point, Size},
   pixelcolor::{Rgb565, RgbColor},
-  primitives::{PrimitiveStyleBuilder, Rectangle, StyledDrawable},
-  Drawable,
-};
-use embedded_layout::{
-  align::{horizontal, vertical, Align},
-  View,
+  primitives::Rectangle,
 };
 
 use super::consts::{BORDER_COLOR, BORDER_SIZE};
 use super::VoltTableRow;
 
-pub struct VoltTable<'a> {
-  usb: VoltTableRow<'a>,
-  ext1: VoltTableRow<'a>,
-  ext2: VoltTableRow<'a>,
-  dc: VoltTableRow<'a>,
-
+/// One row per port: USB1, USB2, DC and the main ports
+pub struct VoltTable {
   bounds: Rectangle,
+  rows: [VoltTableRow; 4],
 }
 
-impl<'a> VoltTable<'a> {
-  pub fn new(top_left: Point, width: u32) -> Self {
-    let (usb, ext1, ext2, dc) = Self::generate_rows_from_point(top_left, width);
-
-    let bounds = Rectangle::with_corners(top_left, dc.bounds().bottom_right().unwrap());
-
-    Self {
-      bounds,
-      usb,
-      ext1,
-      ext2,
-      dc,
-    }
+impl VoltTable {
+  pub fn new(top_left: Point, width: u32, background: Rgb565, highlight: Rgb565) -> Self {
+    let rows = [(Rgb565::WHITE, "USB1"), (Rgb565::GREEN, "USB2"), (Rgb565::CYAN, "DC"), (Rgb565::YELLOW, "MAIN")];
+    let mut i = 0;
+    let rows = rows.map(|(color, caption)| {
+      // Rows start below the top border
+      let y = BORDER_SIZE + i * VoltTableRow::height();
+      i += 1;
+      VoltTableRow::new(top_left + Point::new(0, y as i32), width, color, background, highlight, caption)
+    });
+    Self { bounds: Rectangle::new(top_left, Size::new(width, Self::height())), rows }
   }
 
-  fn generate_rows_from_point(
-    top_left: Point,
-    width: u32,
-  ) -> (
-    VoltTableRow<'a>,
-    VoltTableRow<'a>,
-    VoltTableRow<'a>,
-    VoltTableRow<'a>,
-  ) {
-    // start with border offset. it will be drawn later
-    let rows_top_left = top_left + Point::new(0, BORDER_SIZE as i32);
-
-    let usb = VoltTableRow::new(rows_top_left, width, Rgb565::WHITE, Rgb565::BLACK, "USB");
-
-    let ext1 = VoltTableRow::new(Point::zero(), width, Rgb565::GREEN, Rgb565::BLACK, "EXT1")
-      .align_to(&usb, horizontal::NoAlignment, vertical::TopToBottom);
-
-    let ext2 = VoltTableRow::new(Point::zero(), width, Rgb565::CYAN, Rgb565::BLACK, "EXT2")
-      .align_to(&ext1, horizontal::NoAlignment, vertical::TopToBottom);
-
-    let dc = VoltTableRow::new(Point::zero(), width, Rgb565::YELLOW, Rgb565::BLACK, "DC").align_to(
-      &ext2,
-      horizontal::NoAlignment,
-      vertical::TopToBottom,
-    );
-
-    (usb, ext1, ext2, dc)
+  pub fn height() -> u32 {
+    BORDER_SIZE + 4 * VoltTableRow::height()
   }
 
   pub fn draw_static<D: DrawTarget<Color = Rgb565>>(&self, target: &mut D) -> Result<(), D::Error> {
-    let border_style = PrimitiveStyleBuilder::new()
-      .stroke_width(BORDER_SIZE)
-      .stroke_color(BORDER_COLOR)
-      .stroke_alignment(embedded_graphics::primitives::StrokeAlignment::Inside)
-      .build();
-
-    Rectangle::new(
-      self.bounds.top_left,
-      Size::new(self.bounds.size.width, BORDER_SIZE),
-    )
-    .draw_styled(&border_style, target)?;
-
-    self.usb.draw_static(target)?;
-    self.ext1.draw_static(target)?;
-    self.ext2.draw_static(target)?;
-    self.dc.draw_static(target)?;
-
-    Ok(())
+    target.fill_solid(&Rectangle::new(self.bounds.top_left, Size::new(self.bounds.size.width, BORDER_SIZE)), BORDER_COLOR)?;
+    self.rows.iter().try_for_each(|row| row.draw_static(target))
   }
 
-  pub fn set_usb_values(&mut self, voltage: f32, current: f32, power: f32) -> &Self {
-    self.usb.update_values(voltage, current, power);
-
-    self
-  }
-
-  pub fn set_ext1_values(&mut self, voltage: f32, current: f32, power: f32) -> &Self {
-    self.ext1.update_values(voltage, current, power);
-
-    self
-  }
-
-  pub fn set_ext2_values(&mut self, voltage: f32, current: f32, power: f32) -> &Self {
-    self.ext2.update_values(voltage, current, power);
-
-    self
-  }
-
-  pub fn set_dc_values(&mut self, voltage: f32, current: f32, power: f32) -> &Self {
-    self.dc.update_values(voltage, current, power);
-
-    self
-  }
-}
-
-impl View for VoltTable<'_> {
-  #[inline]
-  fn translate_impl(&mut self, by: Point) {
-    let top_left = self.bounds.top_left + by;
-
-    let (usb, ext1, ext2, dc) = Self::generate_rows_from_point(top_left, self.bounds.size.width);
-
-    self.usb = usb;
-    self.ext1 = ext1;
-    self.ext2 = ext2;
-    self.dc = dc;
-
-    self.bounds = Rectangle::with_corners(top_left, self.dc.bounds().bottom_right().unwrap());
-  }
-
-  #[inline]
-  fn bounds(&self) -> Rectangle {
-    self.bounds
-  }
-}
-
-impl<'a> Drawable for VoltTable<'a> {
-  type Color = Rgb565;
-  type Output = ();
-
-  fn draw<D: DrawTarget<Color = Self::Color>>(&self, target: &mut D) -> Result<(), D::Error> {
-    self.usb.draw(target)?;
-    self.ext1.draw(target)?;
-    self.ext2.draw(target)?;
-    self.dc.draw(target)?;
-
+  /// One `(volts, amps, watts)` per row
+  pub fn update<D: DrawTarget<Color = Rgb565>>(&mut self, values: [(Option<f32>, f32, f32); 4], target: &mut D) -> Result<(), D::Error> {
+    for (row, (volts, amps, watts)) in self.rows.iter_mut().zip(values) {
+      row.update(volts, amps, watts, target)?;
+    }
     Ok(())
   }
 }

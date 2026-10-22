@@ -3,11 +3,7 @@ name = "graphics"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 embedded-graphics.workspace = true
-embedded-layout.workspace = true
-ryu.workspace = true
-numtoa.workspace = true
-micromath.workspace = true
+peripherals.workspace = true
+power.workspace = true

@@ -101,10 +101,10 @@ fn main() -> ! {
 
   display.clear(Rgb565::RED).unwrap();
 
-  let table = VoltTable::new(Point::zero(), 240);
+  let mut table = VoltTable::new(Point::zero(), 240, Rgb565::BLACK, Rgb565::BLACK);
 
   table.draw_static(&mut display).unwrap();
-  table.draw(&mut display).unwrap();
+  table.update([(Some(0.0), 0.0, 0.0); 4], &mut display).unwrap();
 
   rprintln!("BQ4050 init");
   // Bit-banged: the I2C peripheral garbles reads while the BQ4050 stretches the clock

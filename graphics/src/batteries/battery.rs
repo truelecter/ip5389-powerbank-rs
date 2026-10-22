@@ -1,149 +1,64 @@
 use embedded_graphics::{
   draw_target::DrawTarget,
   geometry::{Point, Size},
-  mono_font::MonoTextStyleBuilder,
   pixelcolor::{Rgb565, RgbColor},
-  primitives::{
-    PrimitiveStyleBuilder, Rectangle, RoundedRectangle, StrokeAlignment, StyledDrawable,
-  },
-  text::Text,
-  Drawable,
+  primitives::{CornerRadii, PrimitiveStyleBuilder, Rectangle, RoundedRectangle, StrokeAlignment, StyledDrawable},
 };
 
-use embedded_layout::{
-  align::{horizontal, vertical, Align},
-  View,
-};
+use super::consts::{ANODE_SIZE, BORDER_COLOR, BORDER_SIZE, CORNER_RADIUS, FONT};
+use crate::textual::format::fixed;
+use crate::textual::{Align, Cell};
 
-use super::consts::{ANODE_SIZE, BORDER_COLOR, BORDER_SIZE, FONT};
+/// Characters of the voltage: `4.181`
+const CHARS: usize = 5;
 
-use crate::utils::float_to_fixed;
-
+/// A cell drawn as a battery lying on its side, anode to the left, with its voltage inside
 pub struct Battery {
-  voltage: f32,
   bounds: Rectangle,
-  background_color: Rgb565,
+  voltage: Cell<CHARS>,
 }
 
 impl Battery {
-  pub fn new(top_left: Point, background_color: Rgb565) -> Self {
-    let corner_radius = Size::new_equal(2) + Size::new_equal(BORDER_SIZE);
-    let height = FONT.character_size.height;
-    let width = FONT.character_size.width * 5 + 2;
-
-    let bounds = Rectangle::new(
-      top_left,
-      Size::new(width, height) + corner_radius + Size::new(ANODE_SIZE.width, 0),
+  pub fn new(top_left: Point, background: Rgb565, highlight: Rgb565) -> Self {
+    let size = Self::size();
+    let bounds = Rectangle::new(top_left, size);
+    let inside = Rectangle::new(
+      top_left + Point::new((ANODE_SIZE.width + BORDER_SIZE) as i32, BORDER_SIZE as i32),
+      size - Size::new(ANODE_SIZE.width + 2 * BORDER_SIZE, 2 * BORDER_SIZE),
     );
-
-    Self {
-      bounds,
-      background_color,
-      voltage: 0.0,
-    }
+    let voltage = Cell::new(inside, FONT, Align::Center, Rgb565::WHITE, background).with_highlight(highlight);
+    Self { bounds, voltage }
   }
 
-  pub fn draw_static<D: DrawTarget<Color = Rgb565>>(
-    &self,
-    target: &mut D,
-  ) -> Result<&Self, D::Error> {
-    let anode_style = PrimitiveStyleBuilder::new()
-      .fill_color(BORDER_COLOR)
-      .build();
+  pub fn size() -> Size {
+    let corners = Size::new_equal(CORNER_RADIUS + BORDER_SIZE);
+    let text = Size::new(FONT.character_size.width * CHARS as u32 + 4, FONT.character_size.height);
+    text + corners + Size::new(ANODE_SIZE.width, 0)
+  }
 
-    let anode_rect = Rectangle::new(Point::zero(), ANODE_SIZE).align_to(
-      &self.bounds,
-      horizontal::Left,
-      vertical::Center,
-    );
+  /// The outline
+  pub fn draw_static<D: DrawTarget<Color = Rgb565>>(&self, target: &mut D) -> Result<(), D::Error> {
+    let anode_top = self.bounds.top_left.y + (self.bounds.size.height - ANODE_SIZE.height) as i32 / 2;
+    let anode = Rectangle::new(Point::new(self.bounds.top_left.x, anode_top), ANODE_SIZE);
+    let radius = Size::new_equal(CORNER_RADIUS);
+    let anode_corners = CornerRadii { top_left: radius, bottom_left: radius, top_right: Size::zero(), bottom_right: Size::zero() };
+    RoundedRectangle::new(anode, anode_corners)
+      .draw_styled(&PrimitiveStyleBuilder::new().fill_color(BORDER_COLOR).build(), target)?;
 
-    RoundedRectangle::new(
-      anode_rect,
-      embedded_graphics::primitives::CornerRadii {
-        top_left: Size::new_equal(2),
-        bottom_left: Size::new_equal(2),
-        top_right: Size::zero(),
-        bottom_right: Size::zero(),
-      },
-    )
-    .draw_styled(&anode_style, target)?;
-
-    let border_style = PrimitiveStyleBuilder::new()
+    let border = PrimitiveStyleBuilder::new()
       .stroke_width(BORDER_SIZE)
       .stroke_color(BORDER_COLOR)
       .stroke_alignment(StrokeAlignment::Inside)
       .build();
-
-    let body_rect = Rectangle::new(
-      Point::zero(),
-      Size::new(
-        self.bounds.size.width - ANODE_SIZE.width,
-        self.bounds.size.height,
-      ),
-    )
-    .align_to(&anode_rect, horizontal::LeftToRight, vertical::Center);
-
-    RoundedRectangle::with_equal_corners(body_rect, Size::new_equal(2))
-      .draw_styled(&border_style, target)?;
-
-    Ok(self)
+    let body = Rectangle::new(
+      self.bounds.top_left + Point::new(ANODE_SIZE.width as i32, 0),
+      self.bounds.size - Size::new(ANODE_SIZE.width, 0),
+    );
+    RoundedRectangle::with_equal_corners(body, radius).draw_styled(&border, target)
   }
 
-  pub fn set_voltage(&mut self, voltage: f32) -> &Self {
-    self.voltage = voltage;
-
-    self
-  }
-}
-
-impl View for Battery {
-  #[inline]
-  fn translate_impl(&mut self, by: Point) {
-    // make sure you don't accidentally call `translate`!
-    self.bounds.translate_mut(by);
-  }
-
-  #[inline]
-  fn bounds(&self) -> Rectangle {
-    self.bounds
-  }
-}
-
-impl<'a> Drawable for Battery {
-  type Color = Rgb565;
-  type Output = ();
-
-  fn draw<D: DrawTarget<Color = Self::Color>>(&self, target: &mut D) -> Result<(), D::Error> {
-    let style = MonoTextStyleBuilder::new()
-      .background_color(self.background_color)
-      .text_color(Rgb565::WHITE)
-      .font(&FONT)
-      .build();
-
-    let volts = float_to_fixed::<5>(self.voltage);
-    let volts = core::str::from_utf8(&volts).unwrap();
-
-    let ch_size = style.font;
-
-    let y_diff = self.bounds.size.height - ch_size.baseline;
-    let y_diff = y_diff / 2 + y_diff % 2; // ceil for ints
-
-    let center = self.bounds.top_left
-      + Point::new(
-        (self.bounds.size.width / 2 + 1) as i32,
-        (self.bounds.size.height - y_diff - 1) as i32,
-      );
-
-    let text_anchor = center;
-
-    Text::with_alignment(
-      volts,
-      text_anchor,
-      style,
-      embedded_graphics::text::Alignment::Center,
-    )
-    .draw(target)?;
-
+  pub fn update<D: DrawTarget<Color = Rgb565>>(&mut self, volts: f32, target: &mut D) -> Result<(), D::Error> {
+    self.voltage.update(fixed::<CHARS>(volts, 3, "").as_str(), target)?;
     Ok(())
   }
 }

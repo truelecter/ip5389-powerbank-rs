@@ -57,7 +57,8 @@ const USD_ERASED: u8 = 0xFF;
 /// Polls of FLASH_STS before giving up on an operation. An erase takes milliseconds.
 const OPERATION_TIMEOUT: u32 = 10_000_000;
 
-/// EOPB0 values
+/// EOPB0 values. Each tool binary uses one of them.
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 #[repr(u8)]
 pub enum SramSize {

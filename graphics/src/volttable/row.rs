@@ -1,272 +1,85 @@
 use embedded_graphics::{
   draw_target::DrawTarget,
-  geometry::{AnchorPoint, Point, Size},
-  mono_font::MonoTextStyle,
+  geometry::{Point, Size},
   pixelcolor::Rgb565,
-  primitives::{PrimitiveStyleBuilder, Rectangle, StyledDrawable},
-  text::Text,
-  Drawable,
-};
-
-use embedded_layout::{
-  align::{horizontal, vertical, Align},
-  View,
+  primitives::Rectangle,
 };
 
 use super::consts::{BORDER_COLOR, BORDER_SIZE, PADDING, TABLE_FONT};
-use crate::utils::{darken, float_to_fixed_with_suffix};
+use crate::textual::format::fixed;
+use crate::textual::{Align, Cell};
+use crate::utils::darken;
 
-pub struct VoltTableRow<'a> {
+/// Characters of a value: `16.40V`, `2.100A`
+const CHARS: usize = 6;
+/// Current above which a port counts as in use: its row shows in full color
+const ACTIVE_A: f32 = 0.1;
+
+/// One port: name, volts, amps and watts in bordered cells. The row draws its left, right and
+/// bottom borders; the table draws the top one.
+pub struct VoltTableRow {
   bounds: Rectangle,
-  voltage: f32,
-  current: f32,
-  power: f32,
-  active_text_color: Rgb565,
-  inactive_text_color: Rgb565,
-  background_color: Rgb565,
-  caption: &'a str,
-  cells: VoltTableCells,
+  active_color: Rgb565,
+  inactive_color: Rgb565,
+  name: Cell<CHARS>,
+  /// Volts, amps, watts
+  values: [Cell<CHARS>; 3],
+  caption: &'static str,
 }
 
-struct VoltTableCell {
-  bounds: Rectangle,
-  right_border: Rectangle,
-}
+impl VoltTableRow {
+  pub fn new(top_left: Point, width: u32, active_color: Rgb565, background: Rgb565, highlight: Rgb565, caption: &'static str) -> Self {
+    let bounds = Rectangle::new(top_left, Size::new(width, Self::height()));
+    let inactive_color = darken(active_color, 50);
 
-impl VoltTableCell {
-  fn new(left_border: &Rectangle, size: &Size) -> Self {
-    let bounds = Rectangle::new(Point::zero(), Size::clone(size))
-      .align_to(left_border, horizontal::LeftToRight, vertical::Top)
-      .translate(Point {
-        x: 0,
-        y: PADDING as i32,
-      });
+    // Four cells between five borders; the name cell takes the pixels left over
+    let cell_width = (width - 5 * BORDER_SIZE) / 4;
+    let name_width = width - 5 * BORDER_SIZE - 3 * cell_width;
+    let cell_height = TABLE_FONT.character_size.height + 2 * PADDING;
+    let cell = |x: u32, width: u32| Rectangle::new(top_left + Point::new(x as i32, 0), Size::new(width, cell_height));
+    let value_x = |i: u32| BORDER_SIZE * 2 + name_width + i * (cell_width + BORDER_SIZE);
 
-    Self {
-      bounds,
-      right_border: left_border.align_to(&bounds, horizontal::LeftToRight, vertical::NoAlignment),
-    }
+    let name = Cell::new(cell(BORDER_SIZE, name_width), TABLE_FONT, Align::Center, inactive_color, background);
+    let values = [0, 1, 2].map(|i| {
+      Cell::new(cell(value_x(i), cell_width), TABLE_FONT, Align::Center, inactive_color, background).with_highlight(highlight)
+    });
+    Self { bounds, active_color, inactive_color, name, values, caption }
   }
 
-  fn next_to_with_size(cell: &Self, size: &Size) -> VoltTableCell {
-    VoltTableCell::new(&cell.right_border, size)
+  pub fn height() -> u32 {
+    TABLE_FONT.character_size.height + 2 * PADDING + BORDER_SIZE
   }
 
-  fn next_to(cell: &Self) -> VoltTableCell {
-    VoltTableCell::next_to_with_size(cell, &cell.bounds.size)
-  }
-
-  fn draw_text<D: DrawTarget<Color = Rgb565>>(
-    &self,
-    text: &str,
-    background_color: Rgb565,
-    style: MonoTextStyle<Rgb565>,
-    target: &mut D,
-  ) -> Result<(), D::Error> {
-    let ch_size = style.font;
-
-    let y_diff = self.bounds.size.height - ch_size.baseline;
-    let y_diff = y_diff / 2 + y_diff % 2; // ceil for ints
-
-    let center_diff = Point::new(0, y_diff as i32);
-
-    let text_anchor = self.bounds.anchor_point(AnchorPoint::BottomCenter) - center_diff;
-
-    // TODO: clear cell more efficiently. May be use framebuffer
-    self.bounds.draw_styled(
-      &PrimitiveStyleBuilder::new()
-        .fill_color(background_color)
-        .build(),
-      target,
-    )?;
-
-    Text::with_alignment(
-      text,
-      text_anchor,
-      style,
-      embedded_graphics::text::Alignment::Center,
-    )
-    .draw(target)?;
-
-    Ok(())
-  }
-}
-
-struct VoltTableCells {
-  left_border: Rectangle,
-  name: VoltTableCell,
-  voltage: VoltTableCell,
-  current: VoltTableCell,
-  power: VoltTableCell,
-}
-
-impl VoltTableCells {
-  fn for_bounds(bounds: &Rectangle) -> Self {
-    let size = bounds.size;
-
-    let left_border = Rectangle::new(bounds.top_left, Size::new(BORDER_SIZE, size.height));
-
-    let cell_size = Size {
-      width: (size.width - 5 * BORDER_SIZE) / 4,
-      height: size.height - (2 * PADDING + BORDER_SIZE),
-    };
-
-    let diff = size.width - cell_size.width * 4 - 5 * BORDER_SIZE;
-
-    let first_cell_size = Size {
-      width: cell_size.width + diff,
-      height: cell_size.height,
-    };
-
-    let name_cell = VoltTableCell::new(&left_border, &first_cell_size);
-
-    let volts_cell = VoltTableCell::next_to_with_size(&name_cell, &cell_size);
-
-    let amps_cell = VoltTableCell::next_to(&volts_cell);
-
-    let watts_cell = VoltTableCell::next_to(&amps_cell);
-
-    VoltTableCells {
-      name: name_cell,
-      voltage: volts_cell,
-      current: amps_cell,
-      power: watts_cell,
-      left_border,
-    }
-  }
-}
-
-impl<'a> VoltTableRow<'a> {
-  pub fn new(
-    top_left: Point,
-    width: u32,
-    active_text_color: Rgb565,
-    background_color: Rgb565,
-    caption: &'a str,
-  ) -> Self {
-    let size = Size {
-      width: width as u32,
-      height: TABLE_FONT.character_size.height + 2 * PADDING + BORDER_SIZE,
-    };
-
-    let inactive_text_color = darken(active_text_color, 50);
-
-    let bounds = Rectangle::new(top_left, size);
-
-    Self {
-      bounds,
-      caption,
-      active_text_color,
-      inactive_text_color,
-      background_color,
-      cells: VoltTableCells::for_bounds(&bounds),
-      voltage: 0 as f32,
-      current: 0 as f32,
-      power: 0 as f32,
-    }
-  }
-
-  pub fn draw_static<D: DrawTarget<Color = Rgb565>>(&self, target: &mut D) -> Result<(), D::Error> {
-    let border_style = PrimitiveStyleBuilder::new()
-      .stroke_width(BORDER_SIZE)
-      .stroke_color(BORDER_COLOR)
-      .stroke_alignment(embedded_graphics::primitives::StrokeAlignment::Inside)
-      .build();
-
-    let cells = &self.cells;
-
-    cells.left_border.draw_styled(&border_style, target)?;
-    cells.name.right_border.draw_styled(&border_style, target)?;
-
-    cells
-      .voltage
-      .right_border
-      .draw_styled(&border_style, target)?;
-
-    cells
-      .current
-      .right_border
-      .draw_styled(&border_style, target)?;
-
-    cells
-      .power
-      .right_border
-      .draw_styled(&border_style, target)?;
-
-    // Bottom border
-
-    let br = cells.power.right_border.bottom_right().unwrap();
-    Rectangle::with_corners(
-      Point::new(self.bounds.top_left.x, br.y) - Point::new(0, BORDER_SIZE as i32),
-      br,
-    )
-    .draw_styled(&border_style, target)?;
-
-    Ok(())
-  }
-
-  pub fn update_values(&mut self, voltage: f32, current: f32, power: f32) -> &Self {
-    self.voltage = voltage;
-    self.current = current;
-    self.power = power;
-
-    self
-  }
-}
-
-/// Implementing `View` is required by the layout and alignment operations
-/// `View` teaches `embedded-layout` where our object is, how big it is and how to move it.
-impl View for VoltTableRow<'_> {
-  #[inline]
-  fn translate_impl(&mut self, by: Point) {
-    // make sure you don't accidentally call `translate`!
-    self.bounds.translate_mut(by);
-    self.cells = VoltTableCells::for_bounds(&self.bounds);
-  }
-
-  #[inline]
-  fn bounds(&self) -> Rectangle {
+  pub fn bounds(&self) -> Rectangle {
     self.bounds
   }
-}
 
-impl<'a> Drawable for VoltTableRow<'a> {
-  type Color = Rgb565;
-  type Output = ();
+  /// The vertical borders between the cells and the bottom border
+  pub fn draw_static<D: DrawTarget<Color = Rgb565>>(&self, target: &mut D) -> Result<(), D::Error> {
+    let (top_left, size) = (self.bounds.top_left, self.bounds.size);
+    let mut borders = [self.name.area(), self.values[0].area(), self.values[1].area(), self.values[2].area()]
+      .map(|cell| cell.top_left.x - BORDER_SIZE as i32);
+    borders[0] = top_left.x;
+    for x in borders.into_iter().chain([top_left.x + (size.width - BORDER_SIZE) as i32]) {
+      target.fill_solid(&Rectangle::new(Point::new(x, top_left.y), Size::new(BORDER_SIZE, size.height)), BORDER_COLOR)?;
+    }
+    let bottom = Point::new(top_left.x, top_left.y + (size.height - BORDER_SIZE) as i32);
+    target.fill_solid(&Rectangle::new(bottom, Size::new(size.width, BORDER_SIZE)), BORDER_COLOR)
+  }
 
-  fn draw<D: DrawTarget<Color = Self::Color>>(&self, target: &mut D) -> Result<(), D::Error> {
-    let text_color = if self.current > 0.1 {
-      self.active_text_color
-    } else {
-      self.inactive_text_color
-    };
+  /// Shows the readings; a row without a voltage shows a dash. The row dims while the port
+  /// carries less than 0.1 A.
+  pub fn update<D: DrawTarget<Color = Rgb565>>(&mut self, volts: Option<f32>, amps: f32, watts: f32, target: &mut D) -> Result<(), D::Error> {
+    let color = if amps.abs() > ACTIVE_A { self.active_color } else { self.inactive_color };
+    self.name.set_color(color);
+    self.values.iter_mut().for_each(|cell| cell.set_color(color));
 
-    let text_style = MonoTextStyle::new(TABLE_FONT, text_color);
-
-    let cells = &self.cells;
-
-    cells
-      .name
-      .draw_text(self.caption, self.background_color, text_style, target)?;
-
-    let volts = float_to_fixed_with_suffix::<6>(self.voltage, b'V');
-    let volts = core::str::from_utf8(&volts).unwrap();
-    cells
-      .voltage
-      .draw_text(volts, self.background_color, text_style, target)?;
-
-    let amps = float_to_fixed_with_suffix::<6>(self.current, b'A');
-    let amps = core::str::from_utf8(&amps).unwrap();
-    cells
-      .current
-      .draw_text(amps, self.background_color, text_style, target)?;
-
-    let watts = float_to_fixed_with_suffix::<6>(self.power, b'W');
-    let watts = core::str::from_utf8(&watts).unwrap();
-    cells
-      .power
-      .draw_text(watts, self.background_color, text_style, target)?;
-
+    self.name.update(self.caption, target)?;
+    let volts = volts.map(|v| fixed::<CHARS>(v, 2, "V"));
+    let [v, a, w] = &mut self.values;
+    v.update(volts.as_ref().map_or("-", |v| v.as_str()), target)?;
+    a.update(fixed::<CHARS>(amps, 3, "A").as_str(), target)?;
+    w.update(fixed::<CHARS>(watts, 2, "W").as_str(), target)?;
     Ok(())
   }
 }

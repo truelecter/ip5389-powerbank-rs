@@ -12,8 +12,9 @@ forced-target = "aarch64-apple-darwin"
 embedded-graphics-simulator = "0.8.0"
 
 embedded-graphics = "0.8.2"
-embedded-layout = "0.4.2"
 
 graphics = { path = "../graphics" }
+peripherals = { path = "../peripherals" }
+power = { path = "../power" }
 
 [workspace]
