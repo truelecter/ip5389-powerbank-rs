@@ -91,7 +91,8 @@ fn layout_frame<L: Layout>(state: &mut Option<L>, t: u32, display: &mut Simulato
 
 fn battery_frame(state: &mut Option<BatteryPage>, t: u32, display: &mut SimulatorDisplay<Rgb565>) {
   let (details, phase) = battery_state(t % 40);
-  state.get_or_insert_with(BatteryPage::new).update(&snapshot(t), &details, phase, display).unwrap();
+  let auto_off_s = Some(30 * 60);
+  state.get_or_insert_with(BatteryPage::new).update(&snapshot(t), &details, phase, auto_off_s, display).unwrap();
 }
 
 /// A strip of frames side by side, each one the screen after the updates at `times` up to it

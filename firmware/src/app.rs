@@ -21,7 +21,7 @@ use stm32f1xx_hal::{
 };
 
 use crate::clock::{self, Clock, CycleDelay};
-use crate::capacity;
+use crate::{capacity, store};
 
 /// INA3221 I2C start, address and per-byte timeout
 const I2C_TIMEOUT_US: u32 = 35_000;
@@ -64,7 +64,8 @@ use peripherals::ina3221::{self, INA3221};
 use peripherals::soft_i2c::{self, SoftI2c};
 
 use power::button::{Button, Press};
-use power::learning::{GaugeState, Measurement};
+use power::auto_off::{self, AutoOff};
+use power::learning::{GaugeState, Measurement, Phase};
 use power::{main_port_a, Level, Readings, ScreenPower};
 
 /// Button events since the last update, set by the button interrupt: [`DOWN`], [`SHORT`],
@@ -171,6 +172,9 @@ mod firmware {
     power: ScreenPower,
     seconds: u32,
     level: Level,
+    auto_off: AutoOff,
+    /// Automatic power-off timeout, `None` when off; kept in flash
+    auto_off_s: Option<u32>,
     button: PA0<Input<PullDown>>,
   }
 
@@ -261,6 +265,9 @@ mod firmware {
     let mut bq4050 = BQ4050::new(smbus);
     let mode = logged("BQ4050 battery mode", bq4050.get_battery_mode()).unwrap_or(0);
     let capacity_in_energy = mode & CAPM != 0;
+
+    let auto_off_s = store::load().and_then(|i| auto_off::CHOICES.get(i as usize).copied()).flatten();
+    rprintln!("auto off after {:?} s", auto_off_s);
     rprintln!("BQ4050 battery mode {:#06x}", mode);
 
     // 1 Hz tick from LSI, independent of the clock profile
@@ -298,6 +305,8 @@ mod firmware {
         power: ScreenPower::new(),
         seconds: 0,
         level: Level::Off,
+        auto_off: AutoOff::new(),
+        auto_off_s,
         button,
       },
     )
@@ -317,7 +326,7 @@ mod firmware {
     binds = RTC,
     local = [
       clock, rtc, bq4050, capacity_in_energy, ina3221, display, backlight, screen, battery, page,
-      measurement, details, snapshot, power, seconds, level,
+      measurement, details, snapshot, power, seconds, level, auto_off, auto_off_s,
       // The press started on a bright screen: on a dim or dark one it only wakes it
       press_on_bright: bool = false,
     ]
@@ -366,6 +375,13 @@ mod firmware {
       *cx.local.level = level;
     }
 
+    // A measurement lives in RAM: never switch off during one
+    let busy = !matches!(measurement.phase(), Phase::Idle | Phase::Interrupted);
+    if cx.local.auto_off.update(&readings, events != 0, busy, tick as u32, *cx.local.auto_off_s) {
+      rprintln!("{}s: auto off", seconds);
+      power_off();
+    }
+
     let (page, screen, battery) = (cx.local.page, cx.local.screen, cx.local.battery);
     if let (Some(press), true) = (press, *cx.local.press_on_bright) {
       match *page {
@@ -395,6 +411,14 @@ mod firmware {
             rprintln!("{}s: power off", seconds);
             battery.set_message("Off: unplug the charger");
             power_off();
+          }
+          Some(Action::AutoOff) => {
+            let next = auto_off::next_choice(*cx.local.auto_off_s);
+            let index = auto_off::CHOICES.iter().position(|&c| c == next).unwrap_or(0);
+            let saved = store::save(index as u16).is_ok();
+            rprintln!("{}s: auto off after {:?} s, saved: {}", seconds, next, saved);
+            *cx.local.auto_off_s = next;
+            battery.set_message(if saved { "" } else { "Setting not saved" });
           }
           Some(Action::GaugeShutdown) => {
             let sent = logged("BQ4050 shutdown", cx.local.bq4050.shutdown()).is_some();
@@ -440,7 +464,8 @@ mod firmware {
       Page::Battery => {
         measure_details(details, cx.local.bq4050, seconds);
         let phase = measurement.phase();
-        cx.local.clock.fast(|| battery.update(s, details, phase, display)).ok();
+        let auto_off_s = *cx.local.auto_off_s;
+        cx.local.clock.fast(|| battery.update(s, details, phase, auto_off_s, display)).ok();
       }
     }
     // After drawing: the first update replaces whatever the panel showed at power-on

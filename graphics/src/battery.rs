@@ -36,13 +36,15 @@ pub enum Action {
   PowerOff,
   /// Gauge shutdown: the gauge turns the battery off until a charger is connected
   GaugeShutdown,
+  /// Steps the automatic power-off through its timeouts
+  AutoOff,
   Back,
 }
 
 /// Lines of the page
 const LINES: usize = 14;
 /// First line of the actions
-const ACTIONS_LINE: usize = 10;
+const ACTIONS_LINE: usize = 9;
 
 pub struct BatteryPage {
   menu: Menu,
@@ -58,12 +60,12 @@ impl BatteryPage {
 
   /// The actions in this measurement phase, and how many there are. Powering off isn't
   /// offered while measuring: the measurement lives in RAM.
-  pub fn actions(phase: Phase) -> ([Action; 4], usize) {
+  pub fn actions(phase: Phase) -> ([Action; 5], usize) {
     use Action::*;
     match phase {
-      Phase::Idle | Phase::Interrupted => ([StartMeasuring, PowerOff, GaugeShutdown, Back], 4),
-      Phase::Done { mah } => ([Save(mah), StartMeasuring, PowerOff, Back], 4),
-      _ => ([StopMeasuring, Back, Back, Back], 2),
+      Phase::Idle | Phase::Interrupted => ([StartMeasuring, AutoOff, PowerOff, GaugeShutdown, Back], 5),
+      Phase::Done { mah } => ([Save(mah), StartMeasuring, AutoOff, PowerOff, Back], 5),
+      _ => ([StopMeasuring, AutoOff, Back, Back, Back], 3),
     }
   }
 
@@ -84,20 +86,22 @@ impl BatteryPage {
     self.message = message;
   }
 
+  /// `auto_off_s` is the automatic power-off timeout, `None` when off
   pub fn update<D: DrawTarget<Color = Rgb565>>(
     &mut self,
     s: &Snapshot,
     d: &Details,
     phase: Phase,
+    auto_off_s: Option<u32>,
     target: &mut D,
   ) -> Result<(), D::Error> {
-    let lines = self.lines(s, d, phase);
+    let lines = self.lines(s, d, phase, auto_off_s);
     let rows: [&str; LINES] = core::array::from_fn(|i| lines[i].as_str());
     let selected = ACTIONS_LINE + self.selected % Self::actions(phase).1;
     self.menu.update("Battery", &rows, Some(selected), target)
   }
 
-  fn lines(&self, s: &Snapshot, d: &Details, phase: Phase) -> [Text; LINES] {
+  fn lines(&self, s: &Snapshot, d: &Details, phase: Phase, auto_off_s: Option<u32>) -> [Text; LINES] {
     let mut lines = [Text::new(); LINES];
     lines[0] = line(format_args!("Full     {} mAh", d.full_mah));
     lines[1] = line(format_args!("Design   {} mAh", d.design_mah));
@@ -109,8 +113,9 @@ impl BatteryPage {
     lines[6] = line(format_args!("Cells    {:.2} {:.2} {:.2} {:.2}", c[0], c[1], c[2], c[3]));
     let (state, hint) = describe(phase);
     lines[7] = line(format_args!("Measure  {}", state.as_str()));
-    lines[8] = line(format_args!("         {}", hint));
-    lines[9] = line(format_args!("{}", self.message));
+    // The outcome of the last action takes the place of the hint
+    let note = if self.message.is_empty() { hint } else { self.message };
+    lines[8] = line(format_args!("         {}", note));
     let (actions, count) = Self::actions(phase);
     for (row, action) in lines[ACTIONS_LINE..].iter_mut().zip(&actions[..count]) {
       *row = match action {
@@ -119,6 +124,11 @@ impl BatteryPage {
         Action::Save(mah) => line(format_args!("> Save {} mAh to gauge", mah)),
         Action::PowerOff => line(format_args!("> Power off")),
         Action::GaugeShutdown => line(format_args!("> Gauge shutdown")),
+        Action::AutoOff => match auto_off_s {
+          None => line(format_args!("> Auto off: never")),
+          Some(s) if s >= 3600 => line(format_args!("> Auto off: {} h", s / 3600)),
+          Some(s) => line(format_args!("> Auto off: {} min", s / 60)),
+        },
         Action::Back => line(format_args!("> Back")),
       };
     }
@@ -197,6 +207,8 @@ mod tests {
     let done = Phase::Done { mah: 6870 };
     page.press(Press::Short, done);
     page.press(Press::Short, done);
+    assert_eq!(page.press(Press::Long, done), Some(Action::AutoOff));
+    page.press(Press::Short, done);
     assert_eq!(page.press(Press::Long, done), Some(Action::PowerOff));
     page.press(Press::Short, done);
     assert_eq!(page.press(Press::Long, done), Some(Action::Back));
@@ -219,9 +231,10 @@ mod tests {
   fn selection_stays_valid_when_the_actions_shrink() {
     let mut page = BatteryPage::new();
     let done = Phase::Done { mah: 6870 };
-    page.press(Press::Short, done);
-    page.press(Press::Short, done);
-    // Third action selected; measuring has two
+    for _ in 0..3 {
+      page.press(Press::Short, done);
+    }
+    // Fourth action selected; measuring has three
     let measuring = Phase::Discharging { mah: 10.0, charged_mah: 0.0 };
     assert_eq!(page.press(Press::Long, measuring), Some(Action::StopMeasuring));
   }

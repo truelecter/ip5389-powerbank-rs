@@ -10,6 +10,7 @@
 //! the measured ports and the board itself, see [`main_port_a`].
 #![no_std]
 
+pub mod auto_off;
 pub mod button;
 pub mod learning;
 

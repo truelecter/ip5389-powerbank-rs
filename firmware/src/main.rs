@@ -5,6 +5,7 @@
 mod app;
 mod clock;
 mod capacity;
+mod store;
 
 /// What the display shows
 type Screen = graphics::layouts::Text;
