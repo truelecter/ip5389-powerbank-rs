@@ -38,7 +38,6 @@ where
   type Error = Error<PinE>;
   type Color = Rgb565;
 
-  #[cfg(not(feature = "batch"))]
   fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
   where
     I: IntoIterator<Item = Pixel<Self::Color>>,
@@ -52,16 +51,6 @@ where
     }
 
     Ok(())
-  }
-
-  #[cfg(feature = "batch")]
-  fn draw_iter<T>(&mut self, item: T) -> Result<(), Self::Error>
-  where
-    T: IntoIterator<Item = Pixel<Rgb565>>,
-  {
-    use crate::batch::DrawBatch;
-
-    self.draw_batch(item)
   }
 
   fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>

@@ -8,14 +8,14 @@ use packed_struct::prelude::*;
 pub enum Address {
   /// Device address
   Dev = 0x0B,
-  /// Register of MAC
-  Mac = 0x44,
 }
 
 // Each methods refers the corresponding section and command from bq4050 Technical Reference https://www.ti.com/lit/ug/sluuaq3a/sluuaq3a.pdf
 // Read word commands
 #[derive(Copy, Clone)]
 pub enum Cmd {
+  ManufacturerAccessReg = 0x00,
+  BatteryModeReg = 0x03,
   TemperatureReg = 0x08,
   VoltageReg = 0x09,
   CurrentReg = 0x0A,
@@ -25,6 +25,8 @@ pub enum Cmd {
   AbsoluteSocReg = 0x0E,
   RemainingCapacityReg = 0x0F,
   FullChargeCapacityReg = 0x10,
+  RunTimeToEmptyReg = 0x11,
+  AverageTimeToFullReg = 0x13,
   ChargingCurrentReg = 0x14,
   ChargingVoltageReg = 0x15,
   BatteryStatusReg = 0x16,
@@ -35,8 +37,13 @@ pub enum Cmd {
   CellVoltage1Reg = 0x3F,
   SohReg = 0x4F,
   SerialNumberReg = 0x1C,
+  DesignCapacityReg = 0x18,
+  OperationStatusReg = 0x54,
+  GaugingStatusReg = 0x56,
   DAStatus1 = 0x71,
   DAStatus2 = 0x72,
+  /// MAC subcommands and data flash access, block protocol (TRM 13.1)
+  ManufacturerBlockAccess = 0x44,
 }
 
 /// SBS words are little-endian. Temperatures in 0.1 K.
@@ -93,6 +100,8 @@ pub enum Error<I2cError> {
   /// A block read returned fewer bytes than the command has
   BlockLength(u8),
   Unpack(PackingError),
+  /// ManufacturerBlockAccess() answered for another subcommand or address than requested
+  Echo { expected: u16, got: u16 },
 }
 
 pub struct BQ4050<I2C> {
@@ -122,6 +131,9 @@ where
   // This read/write word function sets various battery operating mode options.
   // Protocol - Word
   // TODO: describe battery modes
+  pub fn get_battery_mode(&mut self) -> Result<u16, Error<I2cError>> {
+    self.read_word(Cmd::BatteryModeReg)
+  }
 
   // 13.5 0x04 AtRate()
   // This read/write word function sets the value used in calculating AtRateTimeToFull() and AtRateTimeToEmpty().
@@ -160,13 +172,7 @@ where
         &mut buffer,
     )?;
 
-    let r = convert_temperature(LittleEndian::read_u16(&buffer[0..2]));
-
-    if r > 50.0 {
-      let a = 1 + 1;
-    }
-
-    Ok(r)
+    Ok(convert_temperature(LittleEndian::read_u16(&buffer[0..2])))
   }
 
   fn int_rw(
@@ -261,6 +267,10 @@ where
   // Protocol - Word
   // Unit - If BatteryMode()[CAPM]= 0, then the data reports in mAh.
   // Unit - If BatteryMode()[CAPM]= 1, then the data reports in 10 mWh.
+  pub fn get_remaining_capacity(&mut self) -> Result<u16, Error<I2cError>> {
+    self.read_word(Cmd::RemainingCapacityReg)
+  }
+
   // ---
   // 13.17 0x10 FullChargeCapacity()
   // This read-word function returns the predicted battery capacity when fully charged.
@@ -274,6 +284,10 @@ where
   // Protocol - Word
   // Unit - min
   // 65535 = Battery is not being discharged.
+  pub fn get_run_time_to_empty(&mut self) -> Result<u16, Error<I2cError>> {
+    self.read_word(Cmd::RunTimeToEmptyReg)
+  }
+
   // ---
   // 13.19 0x12 AverageTimeToEmpty()
   // This read-word function returns the predicted remaining battery capacity based on AverageCurrent().
@@ -285,7 +299,11 @@ where
   // This read-word function returns the predicted time-to-full charge based on AverageCurrent().
   // Protocol - Word
   // Unit - min
-  // 65535 = Battery is not being discharged.
+  // 65535 = Battery is not being charged.
+  pub fn get_average_time_to_full(&mut self) -> Result<u16, Error<I2cError>> {
+    self.read_word(Cmd::AverageTimeToFullReg)
+  }
+
   // ---
   // 13.21 0x14 ChargingCurrent()
   // This read-word function returns the desired charging current.
@@ -590,6 +608,30 @@ where
   // For a description of returned data values, see theManufacturerAccess() version of the same command in Section 13.1.
   // Protocol - Block
   // ---
+  /// FullChargeCapacity() 0x10: mAh, or 10 mWh with BatteryMode()[CAPM]
+  pub fn get_full_charge_capacity(&mut self) -> Result<u16, Error<I2cError>> {
+    self.read_word(Cmd::FullChargeCapacityReg)
+  }
+
+  /// DesignCapacity() 0x18: mAh, or 10 mWh with BatteryMode()[CAPM]
+  pub fn get_design_capacity(&mut self) -> Result<u16, Error<I2cError>> {
+    self.read_word(Cmd::DesignCapacityReg)
+  }
+
+  /// OperationStatus() 0x54, see [`operation`] for the bits
+  pub fn get_operation_status(&mut self) -> Result<u32, Error<I2cError>> {
+    let mut buffer = [0u8; 5];
+    let data = self.read_block(Cmd::OperationStatusReg, &mut buffer)?;
+    Ok(LittleEndian::read_u32(data))
+  }
+
+  /// GaugingStatus() 0x56, see [`gauging`] for the bits
+  pub fn get_gauging_status(&mut self) -> Result<u16, Error<I2cError>> {
+    let mut buffer = [0u8; 3];
+    let data = self.read_block(Cmd::GaugingStatusReg, &mut buffer)?;
+    Ok(LittleEndian::read_u16(data))
+  }
+
   // 13.64 0x71 DAStatus1
   // This command returns the Cell Voltages, PackVoltage, Bat Voltage, Cell Currents, Cell Powers, Power,and AveragePower.
   // For a description of returned data values, see the ManufacturerAccess() versionoft he samecomm and in Section 13.1.
@@ -599,6 +641,13 @@ where
     let mut buffer = [0u8; 33];
     let data = self.read_block(Cmd::DAStatus1, &mut buffer)?;
     DAStatus1::unpack_from_slice(data).map_err(Error::Unpack)
+  }
+
+  /// SMBus read word: little-endian
+  fn read_word(&mut self, cmd: Cmd) -> Result<u16, Error<I2cError>> {
+    let mut buffer = [0u8; 2];
+    self.i2c.write_read(Address::Dev as u8, &[cmd as u8], &mut buffer)?;
+    Ok(LittleEndian::read_u16(&buffer))
   }
 
   /// SMBus block read: the device sends the byte count first. Returns the data after it,
@@ -656,6 +705,112 @@ where
   // For a description of returned data values, see theManufacturerAccess() version of the same command in Section 13.1.
   // Protocol - Block
   // ---
+
+  /// Reads any SBS word command, for commands without their own method
+  pub fn read_sbs_word(&mut self, command: u8) -> Result<u16, Error<I2cError>> {
+    let mut buffer = [0u8; 2];
+    self.i2c.write_read(Address::Dev as u8, &[command], &mut buffer)?;
+    Ok(LittleEndian::read_u16(&buffer))
+  }
+
+  /// Sends a MAC subcommand without data, such as 0x0041 DeviceReset, through
+  /// ManufacturerBlockAccess()
+  pub fn mac_command(&mut self, subcommand: u16) -> Result<(), Error<I2cError>> {
+    self.block_access(subcommand, &[])
+  }
+
+  /// Unseals or grants full access: the two key words go to ManufacturerAccess(), and must
+  /// arrive within 4 s of each other
+  pub fn send_key(&mut self, first: u16, second: u16) -> Result<(), Error<I2cError>> {
+    for word in [first, second] {
+      let [lo, hi] = word.to_le_bytes();
+      self.i2c.write(Address::Dev as u8, &[Cmd::ManufacturerAccessReg as u8, lo, hi])?;
+    }
+    Ok(())
+  }
+
+  /// Runs a MAC subcommand that returns data, such as 0x0056 GaugingStatus. Returns the data
+  /// after the subcommand echo; `buffer` takes the byte count and the echo too (3 bytes more
+  /// than the data).
+  pub fn mac_read<'b>(&mut self, subcommand: u16, buffer: &'b mut [u8]) -> Result<&'b [u8], Error<I2cError>> {
+    self.block_access(subcommand, &[])?;
+    self.read_block_access(subcommand, buffer)
+  }
+
+  /// Reads 32 bytes of data flash from `address` (TRM 13.1.51)
+  pub fn read_data_flash(&mut self, address: u16, data: &mut [u8; 32]) -> Result<(), Error<I2cError>> {
+    self.block_access(address, &[])?;
+    let mut buffer = [0u8; 35];
+    let read = self.read_block_access(address, &mut buffer)?;
+    if read.len() < 32 {
+      return Err(Error::BlockLength(read.len() as u8));
+    }
+    data.copy_from_slice(&read[..32]);
+    Ok(())
+  }
+
+  /// Writes 1 to 32 bytes of data flash at `address`, little-endian values. The gauge needs
+  /// UNSEALED or FULL ACCESS, and NACKs for up to 40 ms while it erases and programs.
+  pub fn write_data_flash(&mut self, address: u16, data: &[u8]) -> Result<(), Error<I2cError>> {
+    if data.is_empty() || data.len() > 32 {
+      return Err(Error::BlockLength(data.len() as u8));
+    }
+    self.block_access(address, data)
+  }
+
+  /// Block write to ManufacturerBlockAccess(): byte count, then `word` little-endian, then `data`
+  fn block_access(&mut self, word: u16, data: &[u8]) -> Result<(), Error<I2cError>> {
+    let mut frame = [0u8; 36];
+    let [lo, hi] = word.to_le_bytes();
+    frame[..4].copy_from_slice(&[Cmd::ManufacturerBlockAccess as u8, (2 + data.len()) as u8, lo, hi]);
+    frame[4..4 + data.len()].copy_from_slice(data);
+    self.i2c.write(Address::Dev as u8, &frame[..4 + data.len()])?;
+    Ok(())
+  }
+
+  /// Block read of ManufacturerBlockAccess(): checks the echo of `word`, returns the data after it
+  fn read_block_access<'b>(&mut self, word: u16, buffer: &'b mut [u8]) -> Result<&'b [u8], Error<I2cError>> {
+    self.i2c.write_read(Address::Dev as u8, &[Cmd::ManufacturerBlockAccess as u8], buffer)?;
+    let count = buffer[0];
+    if count < 2 {
+      return Err(Error::BlockLength(count));
+    }
+    let got = u16::from_le_bytes([buffer[1], buffer[2]]);
+    if got != word {
+      return Err(Error::Echo { expected: word, got });
+    }
+    let end = (1 + count as usize).min(buffer.len());
+    Ok(&buffer[3..end])
+  }
+}
+
+/// GaugingStatus() bits (TRM 13.1.38)
+pub mod gauging {
+  /// Discharge qualified for capacity learning
+  pub const VDQ: u16 = 1 << 15;
+  /// EDV2 reached during discharge: the learning point
+  pub const EDV2: u16 = 1 << 14;
+  /// FullChargeCapacity() updated at EDV2, until the end of the discharge
+  pub const FCCX: u16 = 1 << 10;
+  /// MaxError() above the limit: capacity learning recommended
+  pub const CF: u16 = 1 << 7;
+  pub const DSG: u16 = 1 << 6;
+  /// EDV0 reached: empty
+  pub const EDV0: u16 = 1 << 5;
+  pub const FC: u16 = 1 << 1;
+  pub const FD: u16 = 1 << 0;
+
+  /// Names of the set bits, highest first
+  pub const NAMES: [(u16, &str); 8] =
+    [(VDQ, "VDQ"), (EDV2, "EDV2"), (FCCX, "FCCX"), (CF, "CF"), (DSG, "DSG"), (EDV0, "EDV0"), (FC, "FC"), (FD, "FD")];
+}
+
+/// OperationStatus() bits (TRM 13.1.36)
+pub mod operation {
+  /// SEC1, SEC0: 0b01 full access, 0b10 unsealed, 0b11 sealed
+  pub const SEC_SHIFT: u32 = 8;
+  pub const SEC_MASK: u32 = 0b11;
+  pub const SEALED: u32 = 0b11;
 }
 
 fn convert_temperature(raw: u16) -> f32 {
@@ -735,5 +890,65 @@ mod tests {
     let response = (-1200i16).to_le_bytes();
     let current = BQ4050::new(FakeBus { response: &response }).get_current().unwrap();
     assert_eq!(current, -1200);
+  }
+
+  /// Answers reads with `response` and keeps the bytes of the last write
+  struct RecordingBus<'a> {
+    response: &'a [u8],
+    written: [u8; 36],
+    written_len: usize,
+  }
+
+  impl ErrorType for RecordingBus<'_> {
+    type Error = ErrorKind;
+  }
+
+  impl I2c for RecordingBus<'_> {
+    fn transaction(&mut self, _address: u8, operations: &mut [Operation<'_>]) -> Result<(), ErrorKind> {
+      for operation in operations {
+        match operation {
+          Operation::Read(buffer) => buffer.copy_from_slice(&self.response[..buffer.len()]),
+          Operation::Write(bytes) => {
+            self.written[..bytes.len()].copy_from_slice(bytes);
+            self.written_len = bytes.len();
+          }
+        }
+      }
+      Ok(())
+    }
+  }
+
+  fn recording(response: &[u8]) -> RecordingBus<'_> {
+    RecordingBus { response, written: [0; 36], written_len: 0 }
+  }
+
+  #[test]
+  fn data_flash_write_sends_count_address_and_data() {
+    let mut gauge = BQ4050::new(recording(&[]));
+    gauge.write_data_flash(0x444d, &6800u16.to_le_bytes()).unwrap();
+    let bus = gauge.i2c;
+    assert_eq!(&bus.written[..bus.written_len], &[0x44, 4, 0x4d, 0x44, 0x90, 0x1a]);
+  }
+
+  #[test]
+  fn data_flash_read_returns_the_32_bytes_after_the_address() {
+    let mut response = [0u8; 35];
+    response[..3].copy_from_slice(&[34, 0x00, 0x41]);
+    response[3..5].copy_from_slice(&4400u16.to_le_bytes());
+    response[34] = 0x5a;
+
+    let mut data = [0u8; 32];
+    BQ4050::new(recording(&response)).read_data_flash(0x4100, &mut data).unwrap();
+    assert_eq!(u16::from_le_bytes([data[0], data[1]]), 4400);
+    assert_eq!(data[31], 0x5a);
+  }
+
+  #[test]
+  fn answer_for_another_address_is_an_error() {
+    let mut response = [0u8; 35];
+    response[..3].copy_from_slice(&[34, 0x20, 0x41]);
+
+    let result = BQ4050::new(recording(&response)).read_data_flash(0x4100, &mut [0u8; 32]);
+    assert!(matches!(result, Err(Error::Echo { expected: 0x4100, got: 0x4120 })));
   }
 }
