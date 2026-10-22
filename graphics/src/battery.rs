@@ -32,13 +32,17 @@ pub enum Action {
   StartMeasuring,
   StopMeasuring,
   Save(u16),
+  /// The board's power switch: off at once on battery, with a charger once it goes away
+  PowerOff,
+  /// Gauge shutdown: the gauge turns the battery off until a charger is connected
+  GaugeShutdown,
   Back,
 }
 
 /// Lines of the page
 const LINES: usize = 14;
 /// First line of the actions
-const ACTIONS_LINE: usize = 11;
+const ACTIONS_LINE: usize = 10;
 
 pub struct BatteryPage {
   menu: Menu,
@@ -52,12 +56,14 @@ impl BatteryPage {
     Self { menu: Menu::new(), selected: 0, message: "" }
   }
 
-  /// The actions in this measurement phase, and how many there are
-  pub fn actions(phase: Phase) -> ([Action; 3], usize) {
+  /// The actions in this measurement phase, and how many there are. Powering off isn't
+  /// offered while measuring: the measurement lives in RAM.
+  pub fn actions(phase: Phase) -> ([Action; 4], usize) {
+    use Action::*;
     match phase {
-      Phase::Idle | Phase::Interrupted => ([Action::StartMeasuring, Action::Back, Action::Back], 2),
-      Phase::Done { mah } => ([Action::Save(mah), Action::StartMeasuring, Action::Back], 3),
-      _ => ([Action::StopMeasuring, Action::Back, Action::Back], 2),
+      Phase::Idle | Phase::Interrupted => ([StartMeasuring, PowerOff, GaugeShutdown, Back], 4),
+      Phase::Done { mah } => ([Save(mah), StartMeasuring, PowerOff, Back], 4),
+      _ => ([StopMeasuring, Back, Back, Back], 2),
     }
   }
 
@@ -98,7 +104,7 @@ impl BatteryPage {
     lines[2] = line(format_args!("Left     {} mAh  {} %", d.remaining_mah, s.charge));
     lines[3] = line(format_args!("Error    {} %   Cycles {}", d.max_error, s.cycles));
     lines[4] = flags(d.gauging);
-    lines[5] = line(format_args!("Access   {}", access(d.operation)));
+    lines[5] = line(format_args!("Access   {}  {:#010x}", access(d.operation), d.operation));
     let c = s.cell_volts;
     lines[6] = line(format_args!("Cells    {:.2} {:.2} {:.2} {:.2}", c[0], c[1], c[2], c[3]));
     let (state, hint) = describe(phase);
@@ -111,6 +117,8 @@ impl BatteryPage {
         Action::StartMeasuring => line(format_args!("> Start measuring")),
         Action::StopMeasuring => line(format_args!("> Stop measuring")),
         Action::Save(mah) => line(format_args!("> Save {} mAh to gauge", mah)),
+        Action::PowerOff => line(format_args!("> Power off")),
+        Action::GaugeShutdown => line(format_args!("> Gauge shutdown")),
         Action::Back => line(format_args!("> Back")),
       };
     }
@@ -189,9 +197,22 @@ mod tests {
     let done = Phase::Done { mah: 6870 };
     page.press(Press::Short, done);
     page.press(Press::Short, done);
+    assert_eq!(page.press(Press::Long, done), Some(Action::PowerOff));
+    page.press(Press::Short, done);
     assert_eq!(page.press(Press::Long, done), Some(Action::Back));
     page.press(Press::Short, done);
     assert_eq!(page.press(Press::Long, done), Some(Action::Save(6870)));
+  }
+
+  #[test]
+  fn power_off_is_not_offered_while_measuring() {
+    let mut page = BatteryPage::new();
+    let measuring = Phase::Discharging { mah: 10.0, charged_mah: 0.0 };
+    for _ in 0..4 {
+      page.press(Press::Short, measuring);
+      let action = page.press(Press::Long, measuring);
+      assert!(!matches!(action, Some(Action::PowerOff | Action::GaugeShutdown)), "{action:?}");
+    }
   }
 
   #[test]
@@ -200,7 +221,8 @@ mod tests {
     let done = Phase::Done { mah: 6870 };
     page.press(Press::Short, done);
     page.press(Press::Short, done);
-    // Third action selected; idle has two
-    assert_eq!(page.press(Press::Long, Phase::Idle), Some(Action::StartMeasuring));
+    // Third action selected; measuring has two
+    let measuring = Phase::Discharging { mah: 10.0, charged_mah: 0.0 };
+    assert_eq!(page.press(Press::Long, measuring), Some(Action::StopMeasuring));
   }
 }

@@ -52,6 +52,12 @@ test = false
 bench = false
 
 [[bin]]
+name = "pins"
+path = "src/pins.rs"
+test = false
+bench = false
+
+[[bin]]
 name = "hw"
 path = "src/hw.rs"
 test = false

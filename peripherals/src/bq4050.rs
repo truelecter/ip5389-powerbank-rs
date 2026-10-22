@@ -719,6 +719,13 @@ where
     self.block_access(subcommand, &[])
   }
 
+  /// MAC 0x0010 Shutdown: after a delay the gauge turns its FETs off and sleeps until a
+  /// charger shows up on PACK. With a charger present it doesn't finish until the charger
+  /// goes away.
+  pub fn shutdown(&mut self) -> Result<(), Error<I2cError>> {
+    self.mac_command(0x0010)
+  }
+
   /// Unseals or grants full access: the two key words go to ManufacturerAccess(), and must
   /// arrive within 4 s of each other
   pub fn send_key(&mut self, first: u16, second: u16) -> Result<(), Error<I2cError>> {

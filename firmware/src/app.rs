@@ -87,6 +87,22 @@ enum Page {
   Battery,
 }
 
+/// Switches the board off while it runs on battery; with a charger connected it stays on until
+/// the charger goes away. PB4 must otherwise stay as after reset, JTAG's NJTRST: on battery
+/// the board went dark both when PB4 got the GPIO pull-up and when it was driven low. What
+/// the pin controls on the board is not known yet.
+fn power_off() {
+  // SAFETY: GPIOB pin 4 only, and AFIO SWJ_CFG; SWD stays enabled
+  unsafe {
+    let gpiob = &*pac::GPIOB::ptr();
+    gpiob.bsrr().write(|w| w.bits(1 << (4 + 16)));
+    gpiob.crl().modify(|r, w| w.bits((r.bits() & !(0xf << 16)) | (0b0010 << 16)));
+    // JTAG without NJTRST: PB4 becomes a GPIO
+    let afio = &*pac::AFIO::ptr();
+    afio.mapr().modify(|r, w| w.bits((r.bits() & !(0b111 << 24)) | (0b001 << 24)));
+  }
+}
+
 /// Milliseconds from the RTC counter and its prescaler divider: the same clock as the 1 Hz
 /// tick, independent of the clock profile. Wraps after 49 days.
 fn rtc_millis() -> u32 {
@@ -174,7 +190,6 @@ mod firmware {
     let mut afio = cx.device.AFIO.constrain(&mut rcc);
     let mut gpioa = cx.device.GPIOA.split(&mut rcc);
     let mut gpiob = cx.device.GPIOB.split(&mut rcc);
-
     // PA8 - backlight, low is off
     let backlight = gpioa.pa8.into_alternate_push_pull(&mut gpioa.crh);
     let mut backlight = Timer::new(cx.device.TIM1, &mut rcc)
@@ -376,6 +391,16 @@ mod firmware {
             rprintln!("{}s: save {} mAh: {}", seconds, mah, message);
             battery.set_message(message);
           }
+          Some(Action::PowerOff) => {
+            rprintln!("{}s: power off", seconds);
+            battery.set_message("Off: unplug the charger");
+            power_off();
+          }
+          Some(Action::GaugeShutdown) => {
+            let sent = logged("BQ4050 shutdown", cx.local.bq4050.shutdown()).is_some();
+            rprintln!("{}s: gauge shutdown sent: {}", seconds, sent);
+            battery.set_message(if sent { "Gauge shutdown sent" } else { "Gauge shutdown failed" });
+          }
           Some(Action::Back) => {
             *page = Page::Main;
             *screen = crate::Screen::new();
@@ -413,7 +438,7 @@ mod firmware {
         cx.local.clock.fast(|| screen.update(s, display)).ok();
       }
       Page::Battery => {
-        measure_details(details, cx.local.bq4050);
+        measure_details(details, cx.local.bq4050, seconds);
         let phase = measurement.phase();
         cx.local.clock.fast(|| battery.update(s, details, phase, display)).ok();
       }
@@ -423,7 +448,7 @@ mod firmware {
   }
 
   /// Gauge values only the battery page shows
-  fn measure_details(d: &mut Details, bq4050: &mut Gauge) {
+  fn measure_details(d: &mut Details, bq4050: &mut Gauge, seconds: u32) {
     if let Some(mah) = logged("BQ4050 full charge capacity", bq4050.get_full_charge_capacity()) {
       d.full_mah = mah;
     }
@@ -434,6 +459,9 @@ mod firmware {
       d.max_error = percents;
     }
     if let Some(status) = logged("BQ4050 operation status", bq4050.get_operation_status()) {
+      if status != d.operation {
+        rprintln!("{}s: OperationStatus {:#010x}", seconds, status);
+      }
       d.operation = status;
     }
   }
